@@ -1,0 +1,72 @@
+local M = {}
+
+---@class BangerConfig
+M.defaults = {
+	events = { "BufWritePost" },
+	launch_chance = 1.0,
+	rockets = { min = 1, max = 3 },
+	types = {
+		peony = 4,
+		chrysanthemum = 3,
+		willow = 2,
+		ring = 2,
+		crossette = 2,
+		crackle = 2,
+	},
+	palettes = {
+		single = 4,
+		two_tone = 3,
+		rainbow = 2,
+		gold = 2,
+	},
+	sizes = {
+		small = 3,
+		medium = 4,
+		large = 2,
+	},
+	colors = {
+		"#ff5f5f",
+		"#ff9f43",
+		"#ffe66d",
+		"#7bed9f",
+		"#70a1ff",
+		"#a29bfe",
+		"#ff6bcb",
+		"#eaeaea",
+	},
+	gold = { "#ffd700", "#ffb347", "#fff1a8" },
+	fail_chance = 0.05,
+	fps = 30,
+	max_particles = 400,
+	light = {
+		radius = 25,
+		brightness = 0.7,
+		duration_ms = 600,
+		bg = 0.25,
+	},
+	burn = {
+		duration_ms = 2000,
+		color = "#6b5d4f",
+		smoke = true,
+	},
+	ignore_filetypes = {
+		"TelescopePrompt",
+		"TelescopeResults",
+		"NvimTree",
+		"neo-tree",
+		"lazy",
+		"mason",
+		"help",
+		"dashboard",
+		"alpha",
+		"starter",
+		"notify",
+		"noice",
+		"trouble",
+		"qf",
+		"fugitive",
+		"gitcommit",
+	},
+}
+
+return M
