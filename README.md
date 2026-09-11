@@ -1,8 +1,7 @@
 # banger.nvim
 
-Fireworks in your buffer every time you save. A joke UI plugin in the spirit of
-[starfall.nvim](https://github.com/RedEye-Developers/starfall.nvim), built on the
-same extmark canvas: overlay virtual text on real lines and a `virt_lines` block
+Fireworks in your buffer every time you save. A joke UI plugin drawn on an
+extmark canvas: overlay virtual text on real lines and a `virt_lines` block
 that claims the blank rows below EOF, so a three line file still fills the window.
 
 A rocket climbs from the bottom row, bursts somewhere in the top 60 percent, and
