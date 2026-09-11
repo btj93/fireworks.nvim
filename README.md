@@ -156,6 +156,13 @@ just goes warmer. Two tone fireworks light
 each half of the screen with the colour that flew that way. Extmarks are set at
 priority 200 so the tint wins over treesitter while it lasts.
 
+Rows are mapped through `screenpos`, so lines hidden by `conceal_lines` (as
+no-go.nvim does), closed folds, wrapped continuation rows, and `virt_lines` from
+other plugins are accounted for: the rows below them stay aligned, and those
+rows themselves get no particles or light. Inline and end of line virtual text
+from other plugins is left untouched; the light cannot recolour it, and the glow
+past end of line starts after it.
+
 Windows shorter than 10 rows or narrower than 20 columns are skipped. Rendering
 never raises inside the autocommand; every extmark write is wrapped in `pcall`.
 

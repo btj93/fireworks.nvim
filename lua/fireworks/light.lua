@@ -101,16 +101,28 @@ end
 ---Byte offset of the character covering each display column of `line`, as a
 ---0-indexed array `b` with `b[dw] == #line`. Returns the array and the display
 ---width. Tabs follow `tabstop`; other multibyte characters ask Neovim.
-function M.col_to_byte(line, tabstop)
+---`inlines` is an optional `{byte = width}` map of inline virtual text; the
+---cells it occupies map to `false`, since no buffer text is under them.
+function M.col_to_byte(line, tabstop, inlines)
 	local b = {}
 	local col, byte = 0, 0
-	if not line:find("[\128-\255\t]") then
+	if not inlines and not line:find("[\128-\255\t]") then
 		for c = 0, #line do
 			b[c] = c
 		end
 		return b, #line
 	end
+	local function gap(at)
+		local w = inlines and inlines[at]
+		if w then
+			for c = col, col + w - 1 do
+				b[c] = false
+			end
+			col = col + w
+		end
+	end
 	for ch in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+		gap(byte)
 		local w
 		if ch == "\t" then
 			w = tabstop - (col % tabstop)
@@ -125,8 +137,48 @@ function M.col_to_byte(line, tabstop)
 		col = col + w
 		byte = byte + #ch
 	end
+	gap(byte)
 	b[col] = byte
 	return b, col
+end
+
+local function chunks_width(chunks)
+	local w = 0
+	for _, chunk in ipairs(chunks or {}) do
+		w = w + vim.fn.strdisplaywidth(chunk[1])
+	end
+	return w
+end
+
+---Inline and end-of-line virtual text from other plugins on the visible
+---rows, as `{[row0] = {inline = {[byte] = width}, eol = width}}`, so the
+---geometry can leave those cells alone.
+function M.virtual_text(l)
+	local out = {}
+	local ok, marks = pcall(api.nvim_buf_get_extmarks, l.buf, -1, { l.topline - 1, 0 }, { l.botline - 1, -1 }, { details = true })
+	if not ok then
+		return out
+	end
+	for _, m in ipairs(marks) do
+		local d = m[4]
+		if d.virt_text and d.ns_id ~= ns then
+			local pos = d.virt_text_pos or "eol"
+			if pos == "inline" or pos == "eol" then
+				local entry = out[m[2]]
+				if not entry then
+					entry = { inline = {}, eol = 0 }
+					out[m[2]] = entry
+				end
+				local w = chunks_width(d.virt_text)
+				if pos == "inline" then
+					entry.inline[m[3]] = (entry.inline[m[3]] or 0) + w
+				else
+					entry.eol = entry.eol + w
+				end
+			end
+		end
+	end
+	return out
 end
 
 function M.normal_colors()
@@ -205,13 +257,11 @@ end
 ---treesitter highlighter and from `hl_group` extmarks of any namespace (LSP
 ---semantic tokens, diagnostics, other plugins). Returns `base[row][col]`
 ---for window rows, sparse, holding only groups that set a foreground.
----`rows` is the per-row `{bytes, dw}` from `col_to_byte`, and only window
----rows `first_row..last_row` (inclusive, default all real rows) are scanned.
-function M.base_highlights(l, rows, first_row, last_row)
-	first_row = first_row or 0
-	last_row = last_row or (l.real_rows - 1)
+---`rows` is the per-window-row `{bytes, dw}` from `col_to_byte`, keyed like
+---`l.rows`; buffer rows map to window rows through `l.row_of`.
+function M.base_highlights(l, rows)
 	local base, prio = {}, {}
-	for i = first_row, last_row do
+	for i in pairs(rows) do
 		base[i], prio[i] = {}, {}
 	end
 	local maps = {}
@@ -223,15 +273,14 @@ function M.base_highlights(l, rows, first_row, last_row)
 		end
 		return m
 	end
-	local top = l.topline - 1
-	local scan_top, scan_bot = top + first_row, top + last_row + 1
+	local scan_top, scan_bot = l.topline - 1, l.botline
 	local function paint(sr, sc, er, ec, hl, p)
 		if not M.group_fg(hl) then
 			return
 		end
 		for r = max(sr, scan_top), min(er, scan_bot - 1) do
-			local i = r - top
-			local info = rows[i]
+			local i = l.row_of[r + 1]
+			local info = i and rows[i]
 			if info and base[i] then
 				local m = map_for(i)
 				local c0 = (r == sr) and (m[sc] or info.dw) or 0
@@ -292,30 +341,34 @@ end
 local function base_for(l)
 	local tick = api.nvim_buf_get_changedtick(l.buf)
 	local c = base_cache[l.win]
-	if c and c.buf == l.buf and c.topline == l.topline and c.botline == l.botline and c.width == l.width and c.tick == tick then
+	if c and c.buf == l.buf and c.topline == l.topline and c.botline == l.botline and c.width == l.width and c.tick == tick and c.real_rows == l.real_rows then
 		return c
 	end
 	local lines = {}
-	if l.real_rows > 0 then
+	if l.botline >= l.topline then
 		local ok, got = pcall(api.nvim_buf_get_lines, l.buf, l.topline - 1, l.botline, false)
 		if ok then
 			lines = got
 		end
 	end
 	local tabstop = vim.bo[l.buf].tabstop
+	local virt = M.virtual_text(l)
 	local geometry = {}
-	for i = 0, l.real_rows - 1 do
-		local bytes, dw = M.col_to_byte(lines[i + 1] or "", tabstop)
-		geometry[i] = { bytes = bytes, dw = dw }
+	for i, lnum in pairs(l.rows) do
+		if not l.fold[i] then
+			local v = virt[lnum - 1]
+			local bytes, dw = M.col_to_byte(lines[lnum - l.topline + 1] or "", tabstop, v and next(v.inline) and v.inline or nil)
+			geometry[i] = { bytes = bytes, dw = dw, tail = dw + (v and v.eol or 0) }
+		end
 	end
 	local base = {}
-	if settings.fg > 0 and l.real_rows > 0 then
+	if settings.fg > 0 and next(geometry) then
 		local ok, got = pcall(M.base_highlights, l, geometry)
 		if ok then
 			base = got
 		end
 	end
-	c = { buf = l.buf, topline = l.topline, botline = l.botline, width = l.width, tick = tick, geometry = geometry, base = base }
+	c = { buf = l.buf, topline = l.topline, botline = l.botline, width = l.width, real_rows = l.real_rows, tick = tick, geometry = geometry, base = base }
 	base_cache[l.win] = c
 	return c
 end
@@ -461,13 +514,15 @@ end
 
 ---Runs of consecutive cells sharing a bucket, colour, and base highlight:
 ---`{c0, c1, hl}` with `c1` exclusive. Unlit cells are left out.
-local function row_runs(l, srow, base)
+local function row_runs(l, srow, base, geometry)
 	local runs = {}
 	local cur_b, cur_color, cur_base, start = 0, nil, nil, 0
 	local kbase = srow * STRIDE + l.screen_col
+	local bytes, dw, tail = geometry.bytes, geometry.dw, geometry.tail
 	for c = 0, l.width do
 		local b, col, bs = 0, nil, nil
-		if c < l.width then
+		local covered = (c < dw and bytes[c] == false) or (c >= dw and c < tail)
+		if c < l.width and not covered then
 			local k = kbase + c
 			b = cell_bucket(k)
 			if b > 0 then
@@ -496,12 +551,20 @@ end
 
 local function set_row(entry, runs, geometry)
 	local ids = entry.ids
-	local bytes, dw = geometry.bytes, geometry.dw
+	local bytes, dw, tail = geometry.bytes, geometry.dw, geometry.tail
+	local function byte_at(c)
+		for cc = c, dw do
+			if bytes[cc] then
+				return bytes[cc]
+			end
+		end
+		return bytes[dw]
+	end
 	for _, run in ipairs(runs) do
 		local c0, c1, hl = run[1], run[2], run[3]
 		if c0 < dw then
-			local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, bytes[c0], {
-				end_col = bytes[min(c1, dw)],
+			local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, byte_at(c0), {
+				end_col = byte_at(min(c1, dw)),
 				hl_group = hl,
 				priority = M.PRIORITY,
 				strict = false,
@@ -510,8 +573,8 @@ local function set_row(entry, runs, geometry)
 				ids[#ids + 1] = id
 			end
 		end
-		if c1 > dw then
-			local from = max(c0, dw)
+		if c1 > tail then
+			local from = max(c0, tail)
 			local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, 0, {
 				virt_text = { { rep(" ", c1 - from), hl } },
 				virt_text_pos = "overlay",
@@ -537,11 +600,11 @@ function M.render(layouts, now, light_cfg)
 	local any = false
 	for _, l in ipairs(layouts) do
 		local cache = base_for(l)
-		for i = 0, l.real_rows - 1 do
-			local runs = row_runs(l, l.screen_row + i, cache.base[i] or {})
+		for i, geometry in pairs(cache.geometry) do
+			local runs = row_runs(l, l.screen_row + i, cache.base[i] or {}, geometry)
 			if #runs > 0 then
 				any = true
-				local row0 = l.topline - 1 + i
+				local row0 = l.rows[i] - 1
 				local id = l.win .. ":" .. l.buf .. ":" .. row0
 				seen[id] = true
 				local parts = {}

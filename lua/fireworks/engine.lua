@@ -30,13 +30,16 @@ local function draw_cell(l, queue, y, x, glyph, hl)
 		return
 	end
 	if row < l.real_rows then
-		pcall(set_extmark, l.buf, ns_canvas, l.topline - 1 + row, 0, {
-			virt_text = { { glyph, hl } },
-			virt_text_pos = "overlay",
-			virt_text_win_col = col,
-			hl_mode = "combine",
-			priority = 300,
-		})
+		local lnum = l.rows[row]
+		if lnum and not l.fold[row] then
+			pcall(set_extmark, l.buf, ns_canvas, lnum - 1, 0, {
+				virt_text = { { glyph, hl } },
+				virt_text_pos = "overlay",
+				virt_text_win_col = col,
+				hl_mode = "combine",
+				priority = 300,
+			})
+		end
 	else
 		queue[#queue + 1] = { filler_row = row - l.real_rows, col = col, char = glyph, hl = hl }
 	end

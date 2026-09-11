@@ -27,13 +27,20 @@ function M.compute(win, buf)
 	local line_count = api.nvim_buf_line_count(buf)
 	local topline = wi.topline
 	local botline = min(wi.botline, line_count)
-	local real_rows = max(0, botline - topline + 1)
+	local pos = api.nvim_win_get_position(win)
+	local screen_row = pos[1] + (wi.winbar or 0)
+
+	local rows, row_of, fold = M.row_map(win, topline, botline, screen_row, wi.height)
+
+	local real_rows = 0
+	if botline >= topline then
+		local measured, th = pcall(api.nvim_win_text_height, win, { start_row = topline - 1, end_row = botline - 1 })
+		real_rows = measured and min(wi.height, th.all) or (botline - topline + 1)
+	end
 	local filler_rows = 0
 	if wi.botline >= line_count then
 		filler_rows = max(0, wi.height - real_rows)
 	end
-
-	local pos = api.nvim_win_get_position(win)
 
 	return {
 		win = win,
@@ -42,14 +49,64 @@ function M.compute(win, buf)
 		height = wi.height,
 		topline = topline,
 		botline = botline,
+		rows = rows,
+		row_of = row_of,
+		fold = fold,
 		real_rows = real_rows,
 		filler_rows = filler_rows,
 		total_rows = real_rows + filler_rows,
 		line_count = line_count,
 		last_row = line_count - 1,
-		screen_row = pos[1] + (wi.winbar or 0),
+		screen_row = screen_row,
 		screen_col = pos[2] + wi.textoff,
 	}
+end
+
+---Which buffer line starts on each window row. Concealed lines (`conceal_lines`)
+---report the row of the line that replaces them, closed folds put every line
+---on the fold's row, and wrapped lines or `virt_lines` leave rows that belong
+---to no line start. Returns `rows[row] = lnum`, `row_of[lnum] = row`, and
+---`fold[row] = true` for rows showing a closed fold.
+function M.row_map(win, topline, botline, screen_row, height)
+	local groups = {}
+	for lnum = topline, botline do
+		local ok, sp = pcall(vim.fn.screenpos, win, lnum, 1)
+		if ok and sp.row and sp.row > 0 then
+			local r = sp.row - 1 - screen_row
+			if r >= 0 and r < height then
+				local g = groups[r]
+				if not g then
+					g = {}
+					groups[r] = g
+				end
+				g[#g + 1] = lnum
+			end
+		end
+	end
+	local rows, row_of, fold = {}, {}, {}
+	for r, group in pairs(groups) do
+		local lnum
+		if #group == 1 then
+			lnum = group[1]
+		else
+			local shown = 0
+			for _, candidate in ipairs(group) do
+				local ok, th = pcall(api.nvim_win_text_height, win, { start_row = candidate - 1, end_row = candidate - 1 })
+				if ok and th.all > 0 then
+					shown = shown + 1
+					lnum = lnum or candidate
+				end
+			end
+			if shown > 1 then
+				fold[r] = true
+			end
+		end
+		if lnum then
+			rows[r] = lnum
+			row_of[lnum] = r
+		end
+	end
+	return rows, row_of, fold
 end
 
 function M.big_enough(layout)

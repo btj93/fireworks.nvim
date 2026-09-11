@@ -233,6 +233,40 @@ describe("fireworks.light effects", function()
 		assert.is_true(#blank >= 2, "empty line is graded in overlay runs")
 	end)
 
+	it("leaves other plugins' inline and eol virtual text alone", function()
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local value = 1", "", "" })
+		local other = vim.api.nvim_create_namespace("light_spec_other")
+		vim.api.nvim_buf_set_extmark(buf, other, 0, 5, { virt_text = { { "[INLINE]", "Comment" } }, virt_text_pos = "inline" })
+		vim.api.nvim_buf_set_extmark(buf, other, 0, 0, { virt_text = { { " <- note", "Comment" } }, virt_text_pos = "eol" })
+		local layout = require("fireworks.layout").compute(win, buf)
+		local virt = light.virtual_text(layout)
+		assert.are.equal(8, virt[0].inline[5])
+		assert.are.equal(8, virt[0].eol)
+		local bytes, dw = light.col_to_byte("local value = 1", 8, virt[0].inline)
+		assert.are.equal(23, dw)
+		assert.are.equal(4, bytes[4])
+		assert.is_false(bytes[5])
+		assert.is_false(bytes[12])
+		assert.are.equal(5, bytes[13])
+		assert.are.equal(15, bytes[23])
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 10, 30, 1, { "#ff00ff" })
+		end)
+		local text_runs, overlay_from = 0, nil
+		for _, m in ipairs(marks_on(0)) do
+			local det = m[4]
+			if det.hl_group then
+				text_runs = text_runs + 1
+				assert.is_true(det.end_col <= 5 or m[3] >= 5, "no run straddles the inline text")
+			elseif det.virt_text then
+				overlay_from = math.min(overlay_from or 999, det.virt_text_win_col)
+			end
+		end
+		assert.is_true(text_runs >= 2, "text on both sides of the inline mark is lit")
+		assert.is_true(overlay_from >= 23 + 8, "glow past end of line starts after the eol note, got " .. tostring(overlay_from))
+		vim.api.nvim_buf_clear_namespace(buf, other, 0, -1)
+	end)
+
 	it("blends from the highlight already on the cell", function()
 		light.reset_highlights()
 		vim.api.nvim_set_hl(0, "FireworksTestKeyword", { fg = "#0000ff" })
