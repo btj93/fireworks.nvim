@@ -151,8 +151,10 @@ local function chunks_width(chunks)
 end
 
 ---Inline and end-of-line virtual text from other plugins on the visible
----rows, as `{[row0] = {inline = {[byte] = width}, eol = width}}`, so the
----geometry can leave those cells alone.
+---rows, as `{[row0] = {inline = {[byte] = width}, eol = width, marks = {...}}}`.
+---`marks` lists each mark as `{pos, byte, chunks}` in extmark order and
+---`eol_marks` counts the eol ones, so copies are only drawn when the drawing
+---order is knowable.
 function M.virtual_text(l)
 	local out = {}
 	local ok, marks = pcall(api.nvim_buf_get_extmarks, l.buf, -1, { l.topline - 1, 0 }, { l.botline - 1, -1 }, { details = true })
@@ -166,13 +168,15 @@ function M.virtual_text(l)
 			if pos == "inline" or pos == "eol" then
 				local entry = out[m[2]]
 				if not entry then
-					entry = { inline = {}, eol = 0 }
+					entry = { inline = {}, eol = 0, eol_marks = 0, marks = {} }
 					out[m[2]] = entry
 				end
 				local w = chunks_width(d.virt_text)
+				entry.marks[#entry.marks + 1] = { pos = pos, byte = m[3], chunks = d.virt_text }
 				if pos == "inline" then
 					entry.inline[m[3]] = (entry.inline[m[3]] or 0) + w
 				else
+					entry.eol_marks = entry.eol_marks + 1
 					entry.eol = entry.eol + w
 				end
 			end
@@ -358,7 +362,44 @@ local function base_for(l)
 		if not l.fold[i] then
 			local v = virt[lnum - 1]
 			local bytes, dw = M.col_to_byte(lines[lnum - l.topline + 1] or "", tabstop, v and next(v.inline) and v.inline or nil)
-			geometry[i] = { bytes = bytes, dw = dw, tail = dw + (v and v.eol or 0) }
+			local g = { bytes = bytes, dw = dw, tail = dw, copies = {} }
+			if v then
+				if v.eol > 0 then
+					g.tail = dw + 1 + v.eol
+				end
+				local gap_cols = {}
+				local col = 0
+				while col < dw do
+					if bytes[col] == false then
+						gap_cols[#gap_cols + 1] = col
+						while col < dw and bytes[col] == false do
+							col = col + 1
+						end
+					else
+						col = col + 1
+					end
+				end
+				local inline_bytes = vim.tbl_keys(v.inline)
+				table.sort(inline_bytes)
+				local col_of_byte = {}
+				for k, byte in ipairs(inline_bytes) do
+					col_of_byte[byte] = gap_cols[k]
+				end
+				local seen_at = {}
+				for _, mark in ipairs(v.marks) do
+					if mark.pos == "inline" then
+						local at = col_of_byte[mark.byte]
+						if at then
+							at = at + (seen_at[mark.byte] or 0)
+							seen_at[mark.byte] = (seen_at[mark.byte] or 0) + chunks_width(mark.chunks)
+							g.copies[#g.copies + 1] = { col = at, chunks = mark.chunks }
+						end
+					elseif v.eol_marks == 1 then
+						g.copies[#g.copies + 1] = { col = dw + 1, chunks = mark.chunks }
+					end
+				end
+			end
+			geometry[i] = g
 		end
 	end
 	local base = {}
@@ -549,9 +590,67 @@ local function drop_row(entry)
 	entry.ids = {}
 end
 
-local function set_row(entry, runs, geometry)
+M.VIRT_PRIORITY = 5000
+
+---Per-cell tint for one virtual text copy this frame: a list of
+---`{char, hl_list}` chunks and a signature, or nil when no cell is lit.
+local function lit_copy(l, srow, copy)
+	local chunks, sig, lit = {}, {}, false
+	local col = copy.col
+	local kbase = srow * STRIDE + l.screen_col
+	for _, chunk in ipairs(copy.chunks) do
+		local theirs = chunk[2]
+		local base
+		if type(theirs) == "table" then
+			base = theirs[#theirs]
+		elseif type(theirs) == "string" then
+			base = theirs
+		end
+		for ch in chunk[1]:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+			local w = vim.fn.strdisplaywidth(ch)
+			local k = kbase + col
+			local b = cell_bucket(k)
+			local hls = {}
+			if type(theirs) == "table" then
+				for _, h in ipairs(theirs) do
+					hls[#hls + 1] = h
+				end
+			elseif theirs then
+				hls[1] = theirs
+			end
+			if b > 0 then
+				lit = true
+				local hex = cell_color(k)
+				hls[#hls + 1] = M.tint_hl(hex, b, settings.bg, base, settings.fg)
+				sig[#sig + 1] = b .. hex
+			else
+				sig[#sig + 1] = "0"
+			end
+			chunks[#chunks + 1] = { ch, hls }
+			col = col + w
+		end
+	end
+	if not lit then
+		return nil
+	end
+	return chunks, concat(sig, ",")
+end
+
+local function set_row(entry, runs, geometry, copies)
 	local ids = entry.ids
 	local bytes, dw, tail = geometry.bytes, geometry.dw, geometry.tail
+	for _, copy in ipairs(copies) do
+		local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, 0, {
+			virt_text = copy.chunks,
+			virt_text_pos = "overlay",
+			virt_text_win_col = copy.col,
+			priority = M.VIRT_PRIORITY,
+			strict = false,
+		})
+		if ok then
+			ids[#ids + 1] = id
+		end
+	end
 	local function byte_at(c)
 		for cc = c, dw do
 			if bytes[cc] then
@@ -601,15 +700,23 @@ function M.render(layouts, now, light_cfg)
 	for _, l in ipairs(layouts) do
 		local cache = base_for(l)
 		for i, geometry in pairs(cache.geometry) do
-			local runs = row_runs(l, l.screen_row + i, cache.base[i] or {}, geometry)
-			if #runs > 0 then
+			local srow = l.screen_row + i
+			local runs = row_runs(l, srow, cache.base[i] or {}, geometry)
+			local copies, parts = {}, {}
+			for _, copy in ipairs(geometry.copies) do
+				local chunks, sig = lit_copy(l, srow, copy)
+				if chunks then
+					copies[#copies + 1] = { col = copy.col, chunks = chunks }
+					parts[#parts + 1] = "v" .. copy.col .. ":" .. sig
+				end
+			end
+			if #runs > 0 or #copies > 0 then
 				any = true
 				local row0 = l.rows[i] - 1
 				local id = l.win .. ":" .. l.buf .. ":" .. row0
 				seen[id] = true
-				local parts = {}
-				for j, run in ipairs(runs) do
-					parts[j] = run[1] .. ":" .. run[2] .. ":" .. run[3]
+				for _, run in ipairs(runs) do
+					parts[#parts + 1] = run[1] .. ":" .. run[2] .. ":" .. run[3]
 				end
 				local key = concat(parts, "|")
 				local entry = active_rows[id]
@@ -621,7 +728,7 @@ function M.render(layouts, now, light_cfg)
 					entry.key = key
 					drop_row(entry)
 					if api.nvim_buf_is_valid(l.buf) then
-						set_row(entry, runs, cache.geometry[i])
+						set_row(entry, runs, geometry, copies)
 					end
 				end
 			end

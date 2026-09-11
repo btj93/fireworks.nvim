@@ -160,8 +160,10 @@ Rows are mapped through `screenpos`, so lines hidden by `conceal_lines` (as
 no-go.nvim does), closed folds, wrapped continuation rows, and `virt_lines` from
 other plugins are accounted for: the rows below them stay aligned, and those
 rows themselves get no particles or light. Inline and end of line virtual text
-from other plugins is left untouched; the light cannot recolour it, and the glow
-past end of line starts after it.
+from other plugins is lit too: the plugin draws an overlay copy of the same text
+at the same cells with the original highlight stacked under the tint, and the
+glow past end of line starts after it. Rows with more than one end of line
+virtual text are left alone, since their drawing order is not knowable.
 
 Windows shorter than 10 rows or narrower than 20 columns are skipped. Rendering
 never raises inside the autocommand; every extmark write is wrapped in `pcall`.

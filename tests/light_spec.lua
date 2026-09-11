@@ -233,7 +233,7 @@ describe("fireworks.light effects", function()
 		assert.is_true(#blank >= 2, "empty line is graded in overlay runs")
 	end)
 
-	it("leaves other plugins' inline and eol virtual text alone", function()
+	it("tints other plugins' inline and eol virtual text through overlay copies", function()
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local value = 1", "", "" })
 		local other = vim.api.nvim_create_namespace("light_spec_other")
 		vim.api.nvim_buf_set_extmark(buf, other, 0, 5, { virt_text = { { "[INLINE]", "Comment" } }, virt_text_pos = "inline" })
@@ -252,18 +252,51 @@ describe("fireworks.light effects", function()
 		frame(layout, 0, function()
 			light.emit(layout.screen_row, layout.screen_col + 10, 30, 1, { "#ff00ff" })
 		end)
-		local text_runs, overlay_from = 0, nil
+		local text_runs, tail_from, copies = 0, nil, {}
 		for _, m in ipairs(marks_on(0)) do
 			local det = m[4]
 			if det.hl_group then
 				text_runs = text_runs + 1
 				assert.is_true(det.end_col <= 5 or m[3] >= 5, "no run straddles the inline text")
 			elseif det.virt_text then
-				overlay_from = math.min(overlay_from or 999, det.virt_text_win_col)
+				if det.priority == light.VIRT_PRIORITY then
+					copies[det.virt_text_win_col] = det.virt_text
+				else
+					tail_from = math.min(tail_from or 999, det.virt_text_win_col)
+				end
 			end
 		end
 		assert.is_true(text_runs >= 2, "text on both sides of the inline mark is lit")
-		assert.is_true(overlay_from >= 23 + 8, "glow past end of line starts after the eol note, got " .. tostring(overlay_from))
+		assert.is_true(tail_from >= 23 + 1 + 8, "glow past end of line starts after the eol note, got " .. tostring(tail_from))
+		local inline_copy, eol_copy = copies[5], copies[24]
+		assert.is_not_nil(inline_copy, "inline text gets a lit copy at its column")
+		assert.is_not_nil(eol_copy, "eol text gets a lit copy one cell after end of line")
+		local text = {}
+		for _, chunk in ipairs(inline_copy) do
+			text[#text + 1] = chunk[1]
+			assert.are.equal("Comment", chunk[2][1], "their highlight stays underneath")
+			assert.is_true(chunk[2][2]:find("^FireworksL") ~= nil, "tint stacked on top")
+		end
+		assert.are.equal("[INLINE]", table.concat(text))
+		vim.api.nvim_buf_clear_namespace(buf, other, 0, -1)
+	end)
+
+	it("skips copies when two eol marks share a row", function()
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "text", "", "" })
+		local other = vim.api.nvim_create_namespace("light_spec_other")
+		vim.api.nvim_buf_set_extmark(buf, other, 0, 0, { virt_text = { { " one", "Comment" } }, virt_text_pos = "eol" })
+		vim.api.nvim_buf_set_extmark(buf, other, 0, 0, { virt_text = { { " two", "Comment" } }, virt_text_pos = "eol" })
+		local layout = require("fireworks.layout").compute(win, buf)
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 6, 30, 1, { "#ff00ff" })
+		end)
+		for _, m in ipairs(marks_on(0)) do
+			local det = m[4]
+			if det.virt_text then
+				assert.are_not.equal(light.VIRT_PRIORITY, det.priority)
+				assert.is_true(det.virt_text_win_col >= 4 + 1 + 8, "tail starts after both notes")
+			end
+		end
 		vim.api.nvim_buf_clear_namespace(buf, other, 0, -1)
 	end)
 
