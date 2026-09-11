@@ -193,10 +193,14 @@ end
 ---treesitter highlighter and from `hl_group` extmarks of any namespace (LSP
 ---semantic tokens, diagnostics, other plugins). Returns `base[row][col]`
 ---for window rows 0..real_rows-1, sparse, holding only groups that set a
----foreground. `rows` is the per-row `{bytes, dw}` from `col_to_byte`.
-function M.base_highlights(l, rows)
+---foreground. `rows` is the per-row `{bytes, dw}` from `col_to_byte`, and
+---only window rows `first_row..last_row` (inclusive, default all real rows)
+---are scanned.
+function M.base_highlights(l, rows, first_row, last_row)
+	first_row = first_row or 0
+	last_row = last_row or (l.real_rows - 1)
 	local base, prio = {}, {}
-	for i = 0, l.real_rows - 1 do
+	for i = first_row, last_row do
 		base[i], prio[i] = {}, {}
 	end
 	local maps = {}
@@ -209,14 +213,15 @@ function M.base_highlights(l, rows)
 		return m
 	end
 	local top = l.topline - 1
+	local scan_top, scan_bot = top + first_row, top + last_row + 1
 	local function paint(sr, sc, er, ec, hl, p)
 		if not M.group_fg(hl) then
 			return
 		end
-		for r = max(sr, top), min(er, l.botline - 1) do
+		for r = max(sr, scan_top), min(er, scan_bot - 1) do
 			local i = r - top
 			local info = rows[i]
-			if info then
+			if info and base[i] then
 				local m = map_for(i)
 				local c0 = (r == sr) and (m[sc] or info.dw) or 0
 				local c1 = (r == er) and (m[ec] or info.dw) or info.dw
@@ -233,14 +238,14 @@ function M.base_highlights(l, rows)
 	if vim.treesitter.highlighter.active[l.buf] then
 		local ok, parser = pcall(vim.treesitter.get_parser, l.buf)
 		if ok and parser then
-			pcall(parser.parse, parser, { top, l.botline })
+			pcall(parser.parse, parser, { scan_top, scan_bot })
 			parser:for_each_tree(function(tree, ltree)
 				local query = vim.treesitter.query.get(ltree:lang(), "highlights")
 				if not query then
 					return
 				end
 				local lang = ltree:lang()
-				for id, node, metadata in query:iter_captures(tree:root(), l.buf, top, l.botline) do
+				for id, node, metadata in query:iter_captures(tree:root(), l.buf, scan_top, scan_bot) do
 					local capture = query.captures[id]
 					if capture ~= "spell" and capture ~= "nospell" and capture ~= "conceal" and capture:sub(1, 1) ~= "_" then
 						local meta = metadata[id]
@@ -253,7 +258,7 @@ function M.base_highlights(l, rows)
 		end
 	end
 
-	local ok, marks = pcall(api.nvim_buf_get_extmarks, l.buf, -1, { top, 0 }, { l.botline - 1, -1 }, { details = true, overlap = true })
+	local ok, marks = pcall(api.nvim_buf_get_extmarks, l.buf, -1, { scan_top, 0 }, { scan_bot - 1, -1 }, { details = true, overlap = true })
 	if ok then
 		for _, m in ipairs(marks) do
 			local d = m[4]
@@ -329,22 +334,34 @@ function M.new_effect(opts)
 			end
 		end
 		local tabstop = vim.bo[l.buf].tabstop
+		local lit, first_lit, last_lit = {}, nil, nil
+		for row = 0, l.total_rows - 1 do
+			local d, color = row_cells(opts, e.radius, l.screen_row + row, l.screen_col, l.width)
+			if d then
+				lit[row] = { d = d, color = color }
+				if row < l.real_rows then
+					first_lit = first_lit or row
+					last_lit = row
+				end
+			end
+		end
 		local geometry = {}
-		for i = 0, l.real_rows - 1 do
+		for i = first_lit or 0, last_lit or -1 do
 			local bytes, dw = M.col_to_byte(lines[i + 1] or "", tabstop)
 			geometry[i] = { bytes = bytes, dw = dw }
 		end
 		local base = {}
-		if e.fg > 0 and l.real_rows > 0 then
-			local ok, got = pcall(M.base_highlights, l, geometry)
+		if e.fg > 0 and first_lit then
+			local ok, got = pcall(M.base_highlights, l, geometry, first_lit, last_lit)
 			if ok then
 				base = got
 			end
 		end
 		local fill = {}
 		for row = 0, l.total_rows - 1 do
-			local d, color = row_cells(opts, e.radius, l.screen_row + row, l.screen_col, l.width)
-			if d then
+			local cell = lit[row]
+			if cell then
+				local d, color = cell.d, cell.color
 				if row < l.real_rows then
 					rows[#rows + 1] = {
 						buf = l.buf,
