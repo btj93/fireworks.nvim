@@ -1,6 +1,6 @@
-local light = require("banger.light")
+local light = require("fireworks.light")
 
-describe("banger.light math", function()
+describe("fireworks.light math", function()
 	it("weights columns at half a row", function()
 		assert.are.equal(3, light.distance(0, 0, 3, 0))
 		assert.are.equal(3, light.distance(0, 0, 0, 6))
@@ -61,7 +61,7 @@ describe("banger.light math", function()
 	end)
 end)
 
-describe("banger.light effects", function()
+describe("fireworks.light effects", function()
 	local buf, win
 
 	before_each(function()
@@ -74,7 +74,7 @@ describe("banger.light effects", function()
 	end)
 
 	it("marks only rows within the radius and drops them after the duration", function()
-		local layout = require("banger.layout").compute(win, buf)
+		local layout = require("fireworks.layout").compute(win, buf)
 		local e = light.new_effect({
 			kind = "light",
 			row = layout.screen_row,
@@ -92,15 +92,15 @@ describe("banger.light effects", function()
 			assert.is_true(seg.d < 4)
 		end
 		assert.is_true(light.render(0))
-		local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("banger_light"), 0, -1, {})
+		local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, {})
 		assert.is_true(#marks > 0)
 		assert.is_false(light.render(1.5))
-		marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("banger_light"), 0, -1, {})
-		assert.are.equal(0, #marks, vim.inspect(vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("banger_light"), 0, -1, { details = true })))
+		marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, {})
+		assert.are.equal(0, #marks, vim.inspect(vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, { details = true })))
 	end)
 
 	it("tints filler rows below EOF per segment", function()
-		local layout = require("banger.layout").compute(win, buf)
+		local layout = require("fireworks.layout").compute(win, buf)
 		assert.is_true(layout.filler_rows > 2)
 		light.new_effect({
 			kind = "light",

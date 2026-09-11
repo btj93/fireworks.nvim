@@ -1,4 +1,4 @@
-local light = require("banger.light")
+local light = require("fireworks.light")
 
 local random, floor, sin, cos, sqrt, pi, min = math.random, math.floor, math.sin, math.cos, math.sqrt, math.pi, math.min
 
@@ -77,7 +77,7 @@ function M.palette(kind, cfg)
 	return { colors[random(1, #colors)] }
 end
 
----@class BangerRocket
+---@class FireworksRocket
 ---@field x number
 ---@field y number
 ---@field vy number

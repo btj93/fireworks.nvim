@@ -1,6 +1,6 @@
-local layout = require("banger.layout")
+local layout = require("fireworks.layout")
 
-describe("banger.layout", function()
+describe("fireworks.layout", function()
 	local buf, win
 
 	before_each(function()

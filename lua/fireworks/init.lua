@@ -1,20 +1,20 @@
-local config = require("banger.config")
-local engine = require("banger.engine")
-local fireworks = require("banger.fireworks")
-local layout = require("banger.layout")
-local light = require("banger.light")
+local config = require("fireworks.config")
+local engine = require("fireworks.engine")
+local rockets = require("fireworks.rockets")
+local layout = require("fireworks.layout")
+local light = require("fireworks.light")
 
 local M = {}
 
 M.config = vim.deepcopy(config.defaults)
 M.enabled = true
 
----@param opts BangerConfig|nil
+---@param opts FireworksConfig|nil
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", vim.deepcopy(config.defaults), opts or {})
 	light.reset_highlights()
 
-	local group = vim.api.nvim_create_augroup("Banger", { clear = true })
+	local group = vim.api.nvim_create_augroup("Fireworks", { clear = true })
 	vim.api.nvim_create_autocmd("ColorScheme", {
 		group = group,
 		callback = function()
@@ -60,7 +60,7 @@ function M.toggle()
 	if not M.enabled then
 		engine.stop()
 	end
-	vim.notify("banger.nvim " .. (M.enabled and "armed" or "disarmed"), vim.log.levels.INFO)
+	vim.notify("rockets.nvim " .. (M.enabled and "armed" or "disarmed"), vim.log.levels.INFO)
 	return M.enabled
 end
 
@@ -69,10 +69,10 @@ function M.stop()
 end
 
 function M.command_args()
-	local names = vim.tbl_keys(fireworks.TYPES)
+	local names = vim.tbl_keys(rockets.TYPES)
 	table.sort(names)
 	vim.list_extend(names, { "fail" })
-	vim.list_extend(names, fireworks.FAILURES)
+	vim.list_extend(names, rockets.FAILURES)
 	vim.list_extend(names, { "toggle", "stop" })
 	return names
 end
@@ -86,13 +86,13 @@ function M.command(arg)
 	elseif arg == "stop" then
 		return engine.stop()
 	elseif arg == "fail" then
-		return M.launch({ fail = fireworks.pick_failure() })
-	elseif vim.tbl_contains(fireworks.FAILURES, arg) then
+		return M.launch({ fail = rockets.pick_failure() })
+	elseif vim.tbl_contains(rockets.FAILURES, arg) then
 		return M.launch({ fail = arg })
-	elseif fireworks.TYPES[arg] then
+	elseif rockets.TYPES[arg] then
 		return M.launch({ type = arg })
 	end
-	vim.notify("banger.nvim: unknown argument " .. arg, vim.log.levels.ERROR)
+	vim.notify("rockets.nvim: unknown argument " .. arg, vim.log.levels.ERROR)
 end
 
 return M

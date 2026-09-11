@@ -1,6 +1,6 @@
-local layout_mod = require("banger.layout")
-local fireworks = require("banger.fireworks")
-local light = require("banger.light")
+local layout_mod = require("fireworks.layout")
+local rockets = require("fireworks.rockets")
+local light = require("fireworks.light")
 
 local api = vim.api
 local uv = vim.uv or vim.loop
@@ -8,8 +8,8 @@ local floor, ceil, min, max, random = math.floor, math.ceil, math.min, math.max,
 local set_extmark, del_extmark = api.nvim_buf_set_extmark, api.nvim_buf_del_extmark
 local rep = string.rep
 
-local ns_canvas = api.nvim_create_namespace("banger")
-local ns_filler = api.nvim_create_namespace("banger_filler")
+local ns_canvas = api.nvim_create_namespace("fireworks")
+local ns_filler = api.nvim_create_namespace("fireworks_filler")
 
 local BLANK = { { "", "Normal" } }
 local SIZE_GLOW = { small = 0.75, medium = 1, large = 1.15 }
@@ -43,15 +43,15 @@ local function draw_cell(l, queue, y, x, glyph, hl)
 end
 
 local function draw_rocket(r, l, queue)
-	local hl = light.color_hl(fireworks.ROCKET_COLOR)
+	local hl = light.color_hl(rockets.ROCKET_COLOR)
 	for i, t in ipairs(r.trail) do
-		draw_cell(l, queue, t.y, t.x, fireworks.ROCKET_TRAIL_GLYPHS[i] or ".", hl)
+		draw_cell(l, queue, t.y, t.x, rockets.ROCKET_TRAIL_GLYPHS[i] or ".", hl)
 	end
-	draw_cell(l, queue, r.y, r.x, r.falling and "," or fireworks.ROCKET_HEAD, hl)
+	draw_cell(l, queue, r.y, r.x, r.falling and "," or rockets.ROCKET_HEAD, hl)
 end
 
 local function draw_particle(p, l, queue)
-	if not fireworks.visible(p) then
+	if not rockets.visible(p) then
 		return
 	end
 	if p.trail then
@@ -60,7 +60,7 @@ local function draw_particle(p, l, queue)
 			draw_cell(l, queue, t.y, t.x, "·", dim)
 		end
 	end
-	draw_cell(l, queue, p.y, p.x, fireworks.glyph(p), light.color_hl(p.color))
+	draw_cell(l, queue, p.y, p.x, rockets.glyph(p), light.color_hl(p.color))
 end
 
 local function burst_screen(r, l)
@@ -114,41 +114,41 @@ local function step_show(show, l, dt, now, layouts)
 	show.queue = queue
 	local spawned = {}
 
-	local rockets = {}
+	local flying = {}
 	for _, r in ipairs(show.rockets) do
-		local ev = fireworks.update_rocket(r, dt)
+		local ev = rockets.update_rocket(r, dt)
 		if ev == "burst" then
 			if r.fail == "premature" then
-				append(spawned, fireworks.sparks(r.x, r.y, 5, 3, 0.5, r.palette[1]))
+				append(spawned, rockets.sparks(r.x, r.y, 5, 3, 0.5, r.palette[1]))
 				burn(r, l, layouts, now, 1, true)
 			elseif r.fail == "fizzle" then
-				append(spawned, fireworks.sparks(r.x, r.y, 6, 2.5, 0.6, r.palette[1]))
+				append(spawned, rockets.sparks(r.x, r.y, 6, 2.5, 0.6, r.palette[1]))
 				burn(r, l, layouts, now, 0.3, false)
 			else
-				append(spawned, fireworks.burst(r))
+				append(spawned, rockets.burst(r))
 				shine(r, l, layouts, now)
 			end
 			if r.fail and cfg.burn.smoke then
-				append(spawned, fireworks.smoke(r.x, r.y, 3))
+				append(spawned, rockets.smoke(r.x, r.y, 3))
 			end
 		elseif ev == "impact" then
-			append(spawned, fireworks.sparks(r.x, r.y, 3, 1.5, 0.35, "#c0c0c0"))
+			append(spawned, rockets.sparks(r.x, r.y, 3, 1.5, 0.35, "#c0c0c0"))
 			burn(r, l, layouts, now, 1, true)
 			if cfg.burn.smoke then
-				append(spawned, fireworks.smoke(r.x, r.y, 4))
+				append(spawned, rockets.smoke(r.x, r.y, 4))
 			end
 		else
-			rockets[#rockets + 1] = r
+			flying[#flying + 1] = r
 			if ev == "climbing" then
 				draw_rocket(r, l, queue)
 			end
 		end
 	end
-	show.rockets = rockets
+	show.rockets = flying
 
 	local alive = {}
 	for _, p in ipairs(show.particles) do
-		local ok, kids = fireworks.update_particle(p, dt)
+		local ok, kids = rockets.update_particle(p, dt)
 		if ok then
 			alive[#alive + 1] = p
 			draw_particle(p, l, queue)
@@ -311,7 +311,7 @@ local function start_timer()
 			local ok, err = pcall(tick)
 			if not ok then
 				M.stop()
-				vim.notify("banger.nvim: stopped after error: " .. tostring(err), vim.log.levels.WARN)
+				vim.notify("rockets.nvim: stopped after error: " .. tostring(err), vim.log.levels.WARN)
 			end
 		end)
 	)
@@ -348,7 +348,7 @@ function M.launch(cfg, buf, opts)
 	state.shows[buf] = show
 	local n = opts.count or random(cfg.rockets.min, cfg.rockets.max)
 	for i = 1, n do
-		show.rockets[#show.rockets + 1] = fireworks.new_rocket(l, cfg, {
+		show.rockets[#show.rockets + 1] = rockets.new_rocket(l, cfg, {
 			type = opts.type,
 			fail = opts.fail,
 			delay = (i - 1) * random() * 0.4,

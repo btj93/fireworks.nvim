@@ -1,6 +1,6 @@
 local M = {}
 
----@class BangerConfig
+---@class FireworksConfig
 M.defaults = {
 	events = { "BufWritePost" },
 	launch_chance = 1.0,

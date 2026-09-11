@@ -1,4 +1,4 @@
-# banger.nvim
+# fireworks.nvim
 
 Fireworks in your buffer every time you save. A joke UI plugin drawn on an
 extmark canvas: overlay virtual text on real lines and a `virt_lines` block
@@ -22,7 +22,7 @@ Neovim 0.10 or newer.
 
 ```lua
 return {
-  "btj93/banger.nvim",
+  "btj93/fireworks.nvim",
   event = "VeryLazy",
   opts = {},
 }
@@ -32,7 +32,7 @@ Local checkout:
 
 ```lua
 return {
-  dir = vim.fn.expand("~/nvim-dev/banger.nvim"),
+  dir = vim.fn.expand("~/nvim-dev/fireworks.nvim"),
   event = "VeryLazy",
   opts = {},
 }
@@ -42,18 +42,18 @@ return {
 
 | Command | Effect |
 | --- | --- |
-| `:Banger` | Launch a show over the current buffer now. |
-| `:Banger <type>` | Force a firework type: `peony`, `chrysanthemum`, `willow`, `ring`, `crossette`, `crackle`. |
-| `:Banger fail` | Force a random failure. `:Banger dud`, `:Banger premature`, `:Banger fizzle` pick one. |
-| `:Banger toggle` | Arm or disarm the save trigger. |
-| `:Banger stop` | Clear a running show. |
+| `:Fireworks` | Launch a show over the current buffer now. |
+| `:Fireworks <type>` | Force a firework type: `peony`, `chrysanthemum`, `willow`, `ring`, `crossette`, `crackle`. |
+| `:Fireworks fail` | Force a random failure. `:Fireworks dud`, `:Fireworks premature`, `:Fireworks fizzle` pick one. |
+| `:Fireworks toggle` | Arm or disarm the save trigger. |
+| `:Fireworks stop` | Clear a running show. |
 
 ## Configuration
 
 Every key below is optional. The values shown are the defaults.
 
 ```lua
-require("banger").setup({
+require("fireworks").setup({
   events = { "BufWritePost" },
   launch_chance = 1.0,
   rockets = { min = 1, max = 3 },

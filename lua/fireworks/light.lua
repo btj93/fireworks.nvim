@@ -8,7 +8,7 @@ M.BUCKETS = 8
 M.SEGMENT = 10
 M.PRIORITY = 200
 
-local ns = api.nvim_create_namespace("banger_light")
+local ns = api.nvim_create_namespace("fireworks_light")
 local hl_cache = {}
 local normal
 local effects = {}
@@ -92,7 +92,7 @@ function M.reset_highlights()
 end
 
 function M.color_hl(hex)
-	local name = "BangerC" .. hex:sub(2)
+	local name = "FireworksC" .. hex:sub(2)
 	if not hl_cache[name] then
 		api.nvim_set_hl(0, name, { fg = hex, bold = true })
 		hl_cache[name] = true
@@ -101,7 +101,7 @@ function M.color_hl(hex)
 end
 
 function M.tint_hl(hex, bucket, bg_strength)
-	local name = string.format("BangerL%s_%d", hex:sub(2), bucket)
+	local name = string.format("FireworksL%s_%d", hex:sub(2), bucket)
 	if not hl_cache[name] then
 		local n = M.normal_colors()
 		local t = bucket / M.BUCKETS
@@ -115,7 +115,7 @@ function M.tint_hl(hex, bucket, bg_strength)
 	return name
 end
 
----@class BangerEffectOpts
+---@class FireworksEffectOpts
 ---@field kind "light"|"burn"
 ---@field row integer screen row of the burst
 ---@field col integer screen col of the burst
