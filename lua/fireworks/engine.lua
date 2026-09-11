@@ -47,7 +47,14 @@ local function draw_rocket(r, l, queue)
 	for i, t in ipairs(r.trail) do
 		draw_cell(l, queue, t.y, t.x, rockets.ROCKET_TRAIL_GLYPHS[i] or ".", hl)
 	end
-	draw_cell(l, queue, r.y, r.x, r.falling and "," or rockets.ROCKET_HEAD, hl)
+	local head = rockets.ROCKET_HEAD
+	if r.falling then
+		head = ","
+	elseif r.hanging then
+		head = "."
+		hl = light.tint_hl(rockets.ROCKET_COLOR, 3, 0)
+	end
+	draw_cell(l, queue, r.y, r.x, head, hl)
 end
 
 local function draw_particle(p, l, queue)
@@ -75,8 +82,9 @@ local function shine(r, l, layouts, now)
 		row = row,
 		col = col,
 		palette = r.palette,
-		radius = cfg.light.radius,
-		brightness = cfg.light.brightness * (SIZE_GLOW[r.size] or 1),
+		radius = cfg.light.radius * (rockets.glow(r) > 1 and 1.3 or 1),
+		brightness = cfg.light.brightness * (SIZE_GLOW[r.size] or 1) * rockets.glow(r),
+		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.light.duration_ms / 1000,
 		bg = cfg.light.bg,
 		now = now,
@@ -95,6 +103,7 @@ local function burn(r, l, layouts, now, strength, soot)
 		soot = soot and light.blend(cfg.burn.color, "#000000", 0.45) or nil,
 		radius = cfg.light.radius * 0.6,
 		brightness = cfg.light.brightness * strength,
+		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.burn.duration_ms / 1000,
 		bg = cfg.light.bg,
 		now = now,
@@ -125,6 +134,7 @@ local function step_show(show, l, dt, now, layouts)
 				append(spawned, rockets.sparks(r.x, r.y, 6, 2.5, 0.6, r.palette[1]))
 				burn(r, l, layouts, now, 0.3, false)
 			else
+				append(spawned, rockets.flash(r, rockets.glow(r)))
 				append(spawned, rockets.burst(r))
 				shine(r, l, layouts, now)
 			end
@@ -139,7 +149,7 @@ local function step_show(show, l, dt, now, layouts)
 			end
 		else
 			flying[#flying + 1] = r
-			if ev == "climbing" then
+			if ev ~= "waiting" then
 				draw_rocket(r, l, queue)
 			end
 		end
@@ -347,12 +357,17 @@ function M.launch(cfg, buf, opts)
 	show.win = win
 	state.shows[buf] = show
 	local n = opts.count or random(cfg.rockets.min, cfg.rockets.max)
-	for i = 1, n do
+	local function span(range)
+		return range[1] + random() * (range[2] - range[1])
+	end
+	local delay = span(cfg.stagger.first)
+	for _ = 1, n do
 		show.rockets[#show.rockets + 1] = rockets.new_rocket(l, cfg, {
 			type = opts.type,
 			fail = opts.fail,
-			delay = (i - 1) * random() * 0.4,
+			delay = delay,
 		})
+		delay = delay + span(cfg.stagger.between)
 	end
 	start_timer()
 	return true

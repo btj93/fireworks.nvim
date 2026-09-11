@@ -57,18 +57,35 @@ describe("rockets.rockets physics", function()
 		end
 	end)
 
-	it("climbs, keeps a three cell trail, and bursts at its target", function()
+	it("decelerates to the stall speed, hangs, then bursts at its target", function()
 		local r = rockets.new_rocket(layout, config.defaults, { type = "ring" })
-		local ev
-		for _ = 1, 200 do
+		local ev, hung, stall_vy = nil, 0, nil
+		for _ = 1, 300 do
 			ev = rockets.update_rocket(r, 1 / 30)
 			assert.is_true(#r.trail <= rockets.ROCKET_TRAIL)
+			if ev == "hanging" then
+				hung = hung + 1
+				stall_vy = stall_vy or r.vy
+			end
 			if ev == "burst" then
 				break
 			end
 		end
 		assert.are.equal("burst", ev)
 		assert.are.equal(r.target_y, r.y)
+		assert.is_true(hung >= 4, "hang lasted " .. hung .. " frames")
+		assert.is_true(math.abs(stall_vy) <= rockets.ROCKET_STALL_SPEED + 1, "arrived at " .. tostring(stall_vy))
+	end)
+
+	it("takes over a second to climb a tall window", function()
+		local r = rockets.new_rocket(layout, config.defaults, { type = "peony" })
+		r.target_y = 10
+		r.decel = rockets.climb_decel(r.launch_y - r.target_y)
+		local frames = 0
+		while rockets.update_rocket(r, 1 / 30) == "climbing" do
+			frames = frames + 1
+		end
+		assert.is_true(frames > 45, "climbed in " .. frames .. " frames")
 	end)
 
 	it("dud sputters and falls back to the launch row", function()
@@ -96,12 +113,12 @@ describe("rockets.rockets physics", function()
 		assert.are.equal(rockets.SIZES.medium.count, #ps)
 		for _, p in ipairs(ps) do
 			local hv = p.vx / 2
-			assert.is_true(math.abs(math.sqrt(hv * hv + p.vy * p.vy) - 10) < 1e-6)
+			assert.is_true(math.abs(math.sqrt(hv * hv + p.vy * p.vy) - rockets.SIZES.medium.speed) < 1e-6)
 		end
 		local alive = 0
 		for _, p in ipairs(ps) do
 			local ok = true
-			for _ = 1, 200 do
+			for _ = 1, 300 do
 				ok = rockets.update_particle(p, 1 / 30)
 				if not ok then
 					break
@@ -130,10 +147,42 @@ describe("rockets.rockets physics", function()
 		assert.are.equal(4, #children)
 	end)
 
+	it("pistil adds a slower white inner break when the palette has one colour", function()
+		local r = rockets.new_rocket(layout, config.defaults, { type = "pistil" })
+		r.size = "medium"
+		r.palette = { "#ff0000" }
+		local ps = rockets.burst(r)
+		assert.are.equal(60, #ps)
+		local inner, outer_speed, inner_speed = 0, 0, 0
+		for _, p in ipairs(ps) do
+			local hv = p.vx / 2
+			local speed = math.sqrt(hv * hv + p.vy * p.vy)
+			if p.color == "#ffffff" then
+				inner = inner + 1
+				inner_speed = inner_speed + speed
+			else
+				outer_speed = outer_speed + speed
+			end
+		end
+		assert.are.equal(20, inner)
+		assert.is_true(inner_speed / 20 < outer_speed / 40)
+	end)
+
+	it("palm bursts as arms of six, salute has no particles, kamuro is gold", function()
+		local palm = rockets.new_rocket(layout, config.defaults, { type = "palm" })
+		assert.are.equal(rockets.TYPES.palm.arms * 6, #rockets.burst(palm))
+		local salute = rockets.new_rocket(layout, config.defaults, { type = "salute" })
+		assert.are.equal(0, #rockets.burst(salute))
+		assert.is_true(rockets.glow(salute) > 1)
+		assert.is_true(#rockets.flash(salute, rockets.glow(salute)) > #rockets.flash(palm))
+		local kamuro = rockets.new_rocket(layout, config.defaults, { type = "kamuro" })
+		assert.are.same(config.defaults.gold, kamuro.palette)
+	end)
+
 	it("glyph ramp runs fast to slow to old", function()
 		local p = { vx = 0, vy = 10, age = 0, life = 1 }
 		assert.are.equal("*", rockets.glyph(p))
-		p.vy = 5
+		p.vy = 3
 		assert.are.equal("✦", rockets.glyph(p))
 		p.vy = 1
 		assert.are.equal("·", rockets.glyph(p))

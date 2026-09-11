@@ -5,6 +5,7 @@ M.defaults = {
 	events = { "BufWritePost" },
 	launch_chance = 1.0,
 	rockets = { min = 1, max = 3 },
+	stagger = { first = { 0.3, 0.8 }, between = { 0.4, 1.4 } },
 	types = {
 		peony = 4,
 		chrysanthemum = 3,
@@ -12,6 +13,10 @@ M.defaults = {
 		ring = 2,
 		crossette = 2,
 		crackle = 2,
+		pistil = 2,
+		palm = 2,
+		kamuro = 1,
+		salute = 1,
 	},
 	palettes = {
 		single = 4,
@@ -41,7 +46,8 @@ M.defaults = {
 	light = {
 		radius = 25,
 		brightness = 0.7,
-		duration_ms = 600,
+		attack_ms = 80,
+		duration_ms = 1000,
 		bg = 0.25,
 	},
 	burn = {

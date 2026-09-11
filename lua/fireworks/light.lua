@@ -55,6 +55,18 @@ function M.ease_out(u)
 	return v * v
 end
 
+---Brightness envelope: a linear attack over `attack` seconds, then the
+---quadratic ease out over `duration`. Zero once both have elapsed.
+function M.envelope(elapsed, attack, duration)
+	if elapsed < 0 then
+		return 0
+	end
+	if attack > 0 and elapsed < attack then
+		return elapsed / attack
+	end
+	return M.ease_out((elapsed - attack) / duration)
+end
+
 function M.bucket(intensity)
 	if intensity <= 0 then
 		return 0
@@ -132,6 +144,7 @@ function M.new_effect(opts)
 	local e = {
 		kind = opts.kind,
 		t0 = opts.now,
+		attack = opts.attack or 0,
 		duration = opts.duration,
 		radius = opts.radius,
 		brightness = opts.brightness,
@@ -213,7 +226,7 @@ local function seg_bucket(e, d, decay)
 end
 
 local function decay_of(e, now)
-	return M.ease_out((now - e.t0) / e.duration)
+	return M.envelope(now - e.t0, e.attack, e.duration)
 end
 
 local function drop_marks(e)
@@ -259,7 +272,7 @@ end
 function M.render(now)
 	local alive = {}
 	for _, e in ipairs(effects) do
-		if now - e.t0 >= e.duration then
+		if now - e.t0 >= e.attack + e.duration then
 			drop_marks(e)
 		else
 			render_effect(e, now)
