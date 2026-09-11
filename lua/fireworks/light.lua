@@ -16,7 +16,7 @@ local base_fg_cache = {}
 local normal
 local settings = { brightness = 0.7, bg = 0.25, fg = 1 }
 
-local grid_i, grid_f, grid_c = {}, {}, {}
+local grid_i, grid_r, grid_g, grid_b = {}, {}, {}, {}
 local flashes = {}
 local base_cache = {}
 local active_rows = {}
@@ -51,7 +51,9 @@ function M.intensity(d, radius, brightness)
 	return brightness * f * f
 end
 
----Decay factor for elapsed fraction `u` in [0, 1]: 1 at the burst, 0 at the end.
+---Decay factor for elapsed fraction `u` in [0, 1]: 1 at the burst, 0 at the
+---end. Smoothstep shaped, so the flash holds near full brightness for a
+---moment before it falls instead of dropping steepest at the start.
 function M.ease_out(u)
 	if u <= 0 then
 		return 1
@@ -59,8 +61,7 @@ function M.ease_out(u)
 	if u >= 1 then
 		return 0
 	end
-	local v = 1 - u
-	return v * v
+	return 1 - u * u * (3 - 2 * u)
 end
 
 ---Brightness envelope: a linear attack over `attack` seconds, then the
@@ -321,22 +322,55 @@ end
 
 ---Forget this frame's light field. Call before emitting for a new frame.
 function M.begin_frame()
-	grid_i, grid_f, grid_c = {}, {}, {}
+	grid_i, grid_r, grid_g, grid_b = {}, {}, {}, {}
+end
+
+local rgb_cache = {}
+local function rgb(hex)
+	local c = rgb_cache[hex]
+	if not c then
+		c = { parse(hex) }
+		rgb_cache[hex] = c
+	end
+	return c
+end
+
+M.COLOR_STEP = 32
+
+local quant_cache = {}
+---Intensity-weighted mean colour of a cell, snapped to a coarse grid so
+---blends between two shells produce a handful of groups, not thousands.
+local function cell_color(k)
+	local i = grid_i[k]
+	local step = M.COLOR_STEP
+	local r = min(255, floor(grid_r[k] / i / step + 0.5) * step)
+	local g = min(255, floor(grid_g[k] / i / step + 0.5) * step)
+	local b = min(255, floor(grid_b[k] / i / step + 0.5) * step)
+	local key = r * 65536 + g * 256 + b
+	local hex = quant_cache[key]
+	if not hex then
+		hex = string.format("#%02x%02x%02x", r, g, b)
+		quant_cache[key] = hex
+	end
+	return hex
 end
 
 ---Deposit light around screen cell (`row`, `col`): quadratic falloff over
 ---`radius` rows (twice that in columns), peak `strength`. Colour comes from
 ---`palette` by direction, or `soot` on the rows adjacent to the source.
+---Overlapping emitters add up, and a cell's colour is the mean of what
+---reached it weighted by how much each contributed.
 function M.emit(row, col, radius, strength, palette, soot)
 	if strength <= 0 then
 		return
 	end
-	local single = #palette == 1 and palette[1] or nil
+	local single = #palette == 1 and rgb(palette[1]) or nil
+	local soot_rgb = soot and rgb(soot) or nil
 	local rr, cr = ceil(radius), ceil(radius * 2)
 	for dr = -rr, rr do
 		local srow = row + dr
 		if srow >= 0 then
-			local soot_row = soot and math.abs(dr) <= 1
+			local row_color = (soot_rgb and math.abs(dr) <= 1) and soot_rgb or single
 			local kbase = srow * STRIDE + col
 			for dc = -cr, cr do
 				if col + dc >= 0 then
@@ -345,11 +379,11 @@ function M.emit(row, col, radius, strength, palette, soot)
 						local f = 1 - d / radius
 						f = f * f * strength
 						local k = kbase + dc
+						local c = row_color or rgb(M.color_at(palette, atan2(dr, dc * 0.5)))
 						grid_i[k] = (grid_i[k] or 0) + f
-						if f > (grid_f[k] or 0) then
-							grid_f[k] = f
-							grid_c[k] = soot_row and soot or single or M.color_at(palette, atan2(dr, dc * 0.5))
-						end
+						grid_r[k] = (grid_r[k] or 0) + f * c[1]
+						grid_g[k] = (grid_g[k] or 0) + f * c[2]
+						grid_b[k] = (grid_b[k] or 0) + f * c[3]
 					end
 				end
 			end
@@ -373,13 +407,33 @@ function M.flash(f)
 	flashes[#flashes + 1] = f
 end
 
+M.FLASH_SPLIT = 0.3
+
+---A multi-colour flash is one kernel per colour, each pushed toward its
+---sector by `FLASH_SPLIT` of the radius, so the overlap in the middle sums
+---both colours instead of cutting between them.
+function M.emit_flash(f, strength)
+	local n = #f.palette
+	if n == 1 then
+		M.emit(f.row, f.col, f.radius, strength, f.palette, f.soot)
+		return
+	end
+	local each = strength * 1.6 / n
+	for i, color in ipairs(f.palette) do
+		local mid = ((i - 0.5) / n) * 2 * pi - pi / 2
+		local drow = floor(math.sin(mid) * f.radius * M.FLASH_SPLIT + 0.5)
+		local dcol = floor(math.cos(mid) * f.radius * M.FLASH_SPLIT * 2 + 0.5)
+		M.emit(f.row + drow, f.col + dcol, f.radius, each, { color }, f.soot)
+	end
+end
+
 local function emit_flashes(now)
 	local alive = {}
 	for _, f in ipairs(flashes) do
 		local elapsed = now - f.now
 		if elapsed < f.attack + f.duration then
 			alive[#alive + 1] = f
-			M.emit(f.row, f.col, f.radius, f.strength * M.envelope(elapsed, f.attack, f.duration), f.palette, f.soot)
+			M.emit_flash(f, f.strength * M.envelope(elapsed, f.attack, f.duration))
 		end
 	end
 	flashes = alive
@@ -402,7 +456,7 @@ function M.cell_hl(l, row, col)
 	if b == 0 then
 		return nil
 	end
-	return M.tint_hl(grid_c[k], b, settings.bg, nil, settings.fg)
+	return M.tint_hl(cell_color(k), b, settings.bg, nil, settings.fg)
 end
 
 ---Runs of consecutive cells sharing a bucket, colour, and base highlight:
@@ -417,7 +471,7 @@ local function row_runs(l, srow, base)
 			local k = kbase + c
 			b = cell_bucket(k)
 			if b > 0 then
-				col = grid_c[k]
+				col = cell_color(k)
 				bs = base[c]
 			end
 		end
@@ -530,7 +584,7 @@ function M.clear()
 	active_rows = {}
 	flashes = {}
 	base_cache = {}
-	grid_i, grid_f, grid_c = {}, {}, {}
+	grid_i, grid_r, grid_g, grid_b = {}, {}, {}, {}
 end
 
 return M

@@ -18,7 +18,7 @@ describe("fireworks.light math", function()
 		assert.are.equal(0, light.envelope(0, 0.1, 1))
 		assert.are.equal(0.5, light.envelope(0.05, 0.1, 1))
 		assert.are.equal(1, light.envelope(0.1, 0.1, 1))
-		assert.are.equal(0.25, light.envelope(0.6, 0.1, 1))
+		assert.are.equal(0.5, light.envelope(0.6, 0.1, 1))
 		assert.are.equal(0, light.envelope(1.1, 0.1, 1))
 		assert.are.equal(1, light.envelope(0, 0, 1))
 	end)
@@ -27,7 +27,9 @@ describe("fireworks.light math", function()
 		assert.are.equal(1, light.ease_out(0))
 		assert.are.equal(0, light.ease_out(1))
 		assert.are.equal(0, light.ease_out(2))
-		assert.are.equal(0.25, light.ease_out(0.5))
+		assert.are.equal(0.5, light.ease_out(0.5))
+		assert.is_true(light.ease_out(0.1) > 0.95, "holds bright at the start")
+		assert.is_true(light.ease_out(0.9) < 0.05, "and is nearly out at the end")
 	end)
 
 	it("buckets intensity into eight steps with zero meaning no mark", function()
@@ -154,7 +156,7 @@ describe("fireworks.light effects", function()
 		assert.are.equal(0, #marks_on())
 	end)
 
-	it("sums overlapping emitters and keeps the strongest colour", function()
+	it("sums overlapping emitters and blends their colours by weight", function()
 		local layout = require("fireworks.layout").compute(win, buf)
 		frame(layout, 0, function()
 			light.emit(layout.screen_row, layout.screen_col + 10, 1, 0.2, { "#ff0000" })
@@ -167,7 +169,30 @@ describe("fireworks.light effects", function()
 		end)
 		local stacked = marks_on(0)[1][4].hl_group
 		assert.are_not.equal(faint, stacked)
-		assert.is_true(stacked:find("00ff00", 1, true) ~= nil, "strongest emitter sets the colour: " .. stacked)
+		assert.is_true(stacked:find("a06000", 1, true) ~= nil, "0.4 red + 0.3 green weighted mean, snapped to 32 steps: " .. stacked)
+		assert.is_nil(stacked:find("ff0000", 1, true))
+		assert.is_nil(stacked:find("00ff00", 1, true))
+	end)
+
+	it("a two tone flash blends through its seam", function()
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { string.rep("x", 79), "", "" })
+		local layout = require("fireworks.layout").compute(win, buf)
+		frame(layout, 0, function()
+			light.emit_flash({ row = layout.screen_row, col = layout.screen_col + 40, radius = 10, palette = { "#ff0000", "#0000ff" } }, 1)
+		end)
+		local colors = {}
+		for _, m in ipairs(marks_on(0)) do
+			local hex = m[4].hl_group:match("FireworksL(%x%x%x%x%x%x)")
+			colors[hex] = true
+		end
+		local mixed = false
+		for hex in pairs(colors) do
+			local r, b = tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(5, 6), 16)
+			if r > 0 and b > 0 then
+				mixed = true
+			end
+		end
+		assert.is_true(mixed, "no purple between red and blue: " .. vim.inspect(vim.tbl_keys(colors)))
 	end)
 
 	it("tints filler rows below EOF per cell", function()

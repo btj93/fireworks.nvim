@@ -91,7 +91,7 @@ require("fireworks").setup({
     radius = 25,
     brightness = 0.7,
     attack_ms = 80,
-    duration_ms = 500,
+    duration_ms = 900,
     bg = 0.25,
     fg = 1.0,
     glow = 0.35,
@@ -127,7 +127,7 @@ require("fireworks").setup({
 | `light.radius` | Reach of the burst flash in rows. Columns count for half a row. Cells beyond it get no extmark. |
 | `light.brightness` | Peak blend toward the firework colour at the burst. Intensity is `brightness * (1 - d / radius)^2`. |
 | `light.attack_ms` | Ramp of the burst flash from dark to peak as the shell opens. |
-| `light.duration_ms` | How long the burst flash takes to ease out after its peak. The stars keep glowing for as long as they live. |
+| `light.duration_ms` | How long the burst flash takes to fade after its peak. It holds near full for the first part and falls away at the end. The stars keep glowing for as long as they live. |
 | `light.bg` | Fraction of the intensity also applied to the background, so blank cells and the area past end of line glow too. `0` tints foreground only. |
 | `light.fg` | Strength of the foreground blend. Text keeps its own syntax colour and is pushed toward the firework colour by this fraction of the intensity. `0` leaves foregrounds alone and lights the background only. |
 | `light.glow` | Peak light each star sheds on the cells around it, fading with the star's age. Overlapping stars add up, so a fresh shell glows hardest at its heart. `0` leaves only the burst flash. |
@@ -142,7 +142,8 @@ require("fireworks").setup({
 The light is a byproduct of the particles. Every frame each star deposits a
 small glow around its screen cell, scaled by its age, and the burst adds a short
 bright flash at the break point. Contributions add up into one light field in
-editor screen space, so the glow expands with the shell, drifts and droops with
+editor screen space, and where two colours overlap a cell takes their
+intensity weighted mean, so a two tone shell blends through its seam. The glow expands with the shell, drifts and droops with
 the stars, and dies with them. Every window then reads the field cell by cell:
 neighbouring cells with the same intensity bucket and colour are merged into one
 extmark, so a row is brighter on the side facing the light and the glow past end
