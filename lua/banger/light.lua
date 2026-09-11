@@ -160,6 +160,17 @@ function M.new_effect(opts)
 				local c1 = min(l.width, c0 + M.SEGMENT)
 				local scol = l.screen_col + (c0 + c1) / 2
 				local d = M.distance(opts.row, opts.col, srow, scol)
+				local tail = line ~= nil and c1 >= dw
+				if tail then
+					for s2 = seg + 1, nseg - 1 do
+						local t0 = s2 * M.SEGMENT
+						local tcol = l.screen_col + (t0 + min(l.width, t0 + M.SEGMENT)) / 2
+						local td = M.distance(opts.row, opts.col, srow, tcol)
+						if td < d then
+							d, scol = td, tcol
+						end
+					end
+				end
 				if d < e.radius then
 					local color
 					if opts.soot and math.abs(srow - opts.row) <= 1 then
@@ -169,13 +180,11 @@ function M.new_effect(opts)
 					end
 					if line then
 						if dw == 0 then
-							if seg == 0 then
-								rows[#rows + 1] = { buf = l.buf, row0 = lnum - 1, whole_line = true, d = d, color = color, bucket = 0 }
-							end
-						elseif c0 < dw then
+							rows[#rows + 1] = { buf = l.buf, row0 = lnum - 1, whole_line = true, d = d, color = color, bucket = 0 }
+						else
 							local sb = vim.fn.virtcol2col(l.win, lnum, c0 + 1) - 1
 							local seg_row = { buf = l.buf, row0 = lnum - 1, sb = max(0, sb), d = d, color = color, bucket = 0 }
-							if c1 >= dw then
+							if tail then
 								seg_row.to_eol = true
 							else
 								seg_row.eb = vim.fn.virtcol2col(l.win, lnum, c1 + 1) - 1
@@ -187,6 +196,9 @@ function M.new_effect(opts)
 						fill[fr] = fill[fr] or {}
 						fill[fr][seg] = { d = d, color = color }
 					end
+				end
+				if tail then
+					break
 				end
 			end
 		end
