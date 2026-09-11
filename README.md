@@ -135,9 +135,10 @@ require("fireworks").setup({
 
 On burst the plugin converts the burst cell to editor screen coordinates using
 the window position and text offset, then does the same for every row of every
-visible non floating window. Each row is split into 10 column segments and each
-segment gets its own intensity bucket from its distance to the burst, so a row
-is brighter on the side facing the light. Buckets map to cached highlight
+visible non floating window. Every cell gets its own intensity bucket from its
+distance to the burst, and neighbouring cells with the same bucket are merged into
+one extmark, so a row is brighter on the side facing the light and the glow
+past end of line fades cell by cell. Buckets map to cached highlight
 groups whose foreground is `Normal` blended toward the palette colour, with a
 lighter touch of the same colour on the background. Two tone fireworks light
 each half of the screen with the colour that flew that way. Extmarks are set at

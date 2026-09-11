@@ -1,11 +1,11 @@
 local api = vim.api
 local floor, ceil, sqrt, min, max, atan2, pi = math.floor, math.ceil, math.sqrt, math.min, math.max, math.atan2, math.pi
 local set_extmark, del_extmark = api.nvim_buf_set_extmark, api.nvim_buf_del_extmark
+local rep, concat = string.rep, table.concat
 
 local M = {}
 
 M.BUCKETS = 8
-M.SEGMENT = 10
 M.PRIORITY = 200
 
 local ns = api.nvim_create_namespace("fireworks_light")
@@ -86,6 +86,37 @@ function M.color_at(palette, angle)
 	return palette[min(n, floor(frac * n) + 1)]
 end
 
+---Byte offset of the character covering each display column of `line`, as a
+---0-indexed array `b` with `b[dw] == #line`. Returns the array and the display
+---width. Tabs follow `tabstop`; other multibyte characters ask Neovim.
+function M.col_to_byte(line, tabstop)
+	local b = {}
+	local col, byte = 0, 0
+	if not line:find("[\128-\255\t]") then
+		for c = 0, #line do
+			b[c] = c
+		end
+		return b, #line
+	end
+	for ch in line:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+		local w
+		if ch == "\t" then
+			w = tabstop - (col % tabstop)
+		elseif #ch == 1 then
+			w = 1
+		else
+			w = vim.fn.strdisplaywidth(ch)
+		end
+		for c = col, col + w - 1 do
+			b[c] = byte
+		end
+		col = col + w
+		byte = byte + #ch
+	end
+	b[col] = byte
+	return b, col
+end
+
 function M.normal_colors()
 	if normal then
 		return normal
@@ -134,11 +165,32 @@ end
 ---@field palette string[]
 ---@field radius number
 ---@field brightness number
+---@field attack number seconds
 ---@field duration number seconds
 ---@field bg number bg blend strength
 ---@field now number
 ---@field layouts table[]
 ---@field soot string|nil darker colour for rows adjacent to a burn impact
+
+---Per-cell distance and colour for one screen row of `width` cells starting
+---at `screen_col`. Returns nil when no cell is inside the radius.
+local function row_cells(opts, radius, srow, screen_col, width)
+	local d, color, any = {}, {}, false
+	local soot = opts.soot and math.abs(srow - opts.row) <= 1
+	for c = 0, width - 1 do
+		local scol = screen_col + c
+		local dist = M.distance(opts.row, opts.col, srow, scol)
+		if dist < radius then
+			any = true
+			d[c] = dist
+			color[c] = soot and opts.soot or M.color_at(opts.palette, atan2(srow - opts.row, (scol - opts.col) * 0.5))
+		end
+	end
+	if any then
+		return d, color
+	end
+	return nil
+end
 
 function M.new_effect(opts)
 	local e = {
@@ -161,57 +213,27 @@ function M.new_effect(opts)
 				lines = got
 			end
 		end
+		local tabstop = vim.bo[l.buf].tabstop
 		local fill = {}
-		local nseg = ceil(l.width / M.SEGMENT)
 		for row = 0, l.total_rows - 1 do
-			local srow = l.screen_row + row
-			local line = row < l.real_rows and lines[row + 1] or nil
-			local dw = line and vim.fn.strdisplaywidth(line) or 0
-			local lnum = l.topline + row
-			for seg = 0, nseg - 1 do
-				local c0 = seg * M.SEGMENT
-				local c1 = min(l.width, c0 + M.SEGMENT)
-				local scol = l.screen_col + (c0 + c1) / 2
-				local d = M.distance(opts.row, opts.col, srow, scol)
-				local tail = line ~= nil and c1 >= dw
-				if tail then
-					for s2 = seg + 1, nseg - 1 do
-						local t0 = s2 * M.SEGMENT
-						local tcol = l.screen_col + (t0 + min(l.width, t0 + M.SEGMENT)) / 2
-						local td = M.distance(opts.row, opts.col, srow, tcol)
-						if td < d then
-							d, scol = td, tcol
-						end
-					end
-				end
-				if d < e.radius then
-					local color
-					if opts.soot and math.abs(srow - opts.row) <= 1 then
-						color = opts.soot
-					else
-						color = M.color_at(opts.palette, atan2(srow - opts.row, (scol - opts.col) * 0.5))
-					end
-					if line then
-						if dw == 0 then
-							rows[#rows + 1] = { buf = l.buf, row0 = lnum - 1, whole_line = true, d = d, color = color, bucket = 0 }
-						else
-							local sb = vim.fn.virtcol2col(l.win, lnum, c0 + 1) - 1
-							local seg_row = { buf = l.buf, row0 = lnum - 1, sb = max(0, sb), d = d, color = color, bucket = 0 }
-							if tail then
-								seg_row.to_eol = true
-							else
-								seg_row.eb = vim.fn.virtcol2col(l.win, lnum, c1 + 1) - 1
-							end
-							rows[#rows + 1] = seg_row
-						end
-					else
-						local fr = row - l.real_rows
-						fill[fr] = fill[fr] or {}
-						fill[fr][seg] = { d = d, color = color }
-					end
-				end
-				if tail then
-					break
+			local d, color = row_cells(opts, e.radius, l.screen_row + row, l.screen_col, l.width)
+			if d then
+				if row < l.real_rows then
+					local line = lines[row + 1] or ""
+					local bytes, dw = M.col_to_byte(line, tabstop)
+					rows[#rows + 1] = {
+						buf = l.buf,
+						row0 = l.topline - 1 + row,
+						width = l.width,
+						dw = dw,
+						bytes = bytes,
+						d = d,
+						color = color,
+						marks = {},
+						key = "",
+					}
+				else
+					fill[row - l.real_rows] = { d = d, color = color }
 				end
 			end
 		end
@@ -221,7 +243,7 @@ function M.new_effect(opts)
 	return e
 end
 
-local function seg_bucket(e, d, decay)
+local function cell_bucket(e, d, decay)
 	return M.bucket(M.intensity(d, e.radius, e.brightness) * decay)
 end
 
@@ -229,42 +251,95 @@ local function decay_of(e, now)
 	return M.envelope(now - e.t0, e.attack, e.duration)
 end
 
-local function drop_marks(e)
-	for _, seg in ipairs(e.rows) do
-		if seg.id and api.nvim_buf_is_valid(seg.buf) then
-			pcall(del_extmark, seg.buf, ns, seg.id)
+---Runs of consecutive cells sharing a bucket and colour: `{c0, c1, hl}` with
+---`c1` exclusive. Unlit cells are left out.
+local function row_runs(e, row, decay)
+	local runs = {}
+	local cur_b, cur_color, start = 0, nil, 0
+	local d, color = row.d, row.color
+	for c = 0, row.width do
+		local b, col
+		if c < row.width then
+			local dist = d[c]
+			b = dist and cell_bucket(e, dist, decay) or 0
+			col = color[c]
+		else
+			b = 0
 		end
-		seg.id = nil
+		if b ~= cur_b or (b > 0 and col ~= cur_color) then
+			if cur_b > 0 then
+				runs[#runs + 1] = { start, c, M.tint_hl(cur_color, cur_b, e.bg) }
+			end
+			cur_b, cur_color, start = b, col, c
+		end
+	end
+	return runs
+end
+
+local function drop_row_marks(row)
+	if api.nvim_buf_is_valid(row.buf) then
+		for _, id in ipairs(row.marks) do
+			pcall(del_extmark, row.buf, ns, id)
+		end
+	end
+	row.marks = {}
+end
+
+local function set_row_marks(row, runs)
+	local marks = row.marks
+	local bytes, dw = row.bytes, row.dw
+	for _, run in ipairs(runs) do
+		local c0, c1, hl = run[1], run[2], run[3]
+		if c0 < dw then
+			local ok, id = pcall(set_extmark, row.buf, ns, row.row0, bytes[c0], {
+				end_col = bytes[min(c1, dw)],
+				hl_group = hl,
+				priority = M.PRIORITY,
+				strict = false,
+			})
+			if ok then
+				marks[#marks + 1] = id
+			end
+		end
+		if c1 > dw then
+			local from = max(c0, dw)
+			local ok, id = pcall(set_extmark, row.buf, ns, row.row0, 0, {
+				virt_text = { { rep(" ", c1 - from), hl } },
+				virt_text_pos = "overlay",
+				virt_text_win_col = from,
+				priority = M.PRIORITY,
+				strict = false,
+			})
+			if ok then
+				marks[#marks + 1] = id
+			end
+		end
 	end
 end
 
 local function render_effect(e, now)
 	local decay = decay_of(e, now)
-	for _, seg in ipairs(e.rows) do
-		local b = seg_bucket(e, seg.d, decay)
-		if b ~= seg.bucket then
-			seg.bucket = b
-			if b == 0 then
-				if seg.id then
-					pcall(del_extmark, seg.buf, ns, seg.id)
-					seg.id = nil
-				end
-			elseif api.nvim_buf_is_valid(seg.buf) then
-				local hl = M.tint_hl(seg.color, b, e.bg)
-				local mark
-				if seg.whole_line then
-					mark = { id = seg.id, line_hl_group = hl, priority = M.PRIORITY }
-				elseif seg.to_eol then
-					mark = { id = seg.id, end_row = seg.row0 + 1, end_col = 0, hl_group = hl, hl_eol = true, priority = M.PRIORITY, strict = false }
-				else
-					mark = { id = seg.id, end_col = seg.eb, hl_group = hl, priority = M.PRIORITY, strict = false }
-				end
-				local ok, id = pcall(set_extmark, seg.buf, ns, seg.row0, seg.whole_line and 0 or seg.sb, mark)
-				if ok then
-					seg.id = id
-				end
+	for _, row in ipairs(e.rows) do
+		local runs = row_runs(e, row, decay)
+		local parts = {}
+		for i, run in ipairs(runs) do
+			parts[i] = run[1] .. ":" .. run[2] .. ":" .. run[3]
+		end
+		local key = concat(parts, "|")
+		if key ~= row.key then
+			row.key = key
+			drop_row_marks(row)
+			if #runs > 0 and api.nvim_buf_is_valid(row.buf) then
+				set_row_marks(row, runs)
 			end
 		end
+	end
+end
+
+local function drop_marks(e)
+	for _, row in ipairs(e.rows) do
+		drop_row_marks(row)
+		row.key = ""
 	end
 end
 
@@ -283,17 +358,18 @@ function M.render(now)
 	return #effects > 0
 end
 
----Highlight for a below-EOF filler cell of `win`, or nil when unlit.
-function M.filler_tint(win, filler_row, seg, now)
+---Highlight for one below-EOF filler cell of `win`, or nil when unlit.
+function M.filler_hl(win, filler_row, col, now)
 	local best, best_hl = 0, nil
 	for _, e in ipairs(effects) do
 		local fill = e.fillers[win]
-		local entry = fill and fill[filler_row] and fill[filler_row][seg]
-		if entry then
-			local b = seg_bucket(e, entry.d, decay_of(e, now))
+		local entry = fill and fill[filler_row]
+		local d = entry and entry.d[col]
+		if d then
+			local b = cell_bucket(e, d, decay_of(e, now))
 			if b > best then
 				best = b
-				best_hl = M.tint_hl(entry.color, b, e.bg)
+				best_hl = M.tint_hl(entry.color[col], b, e.bg)
 			end
 		end
 	end

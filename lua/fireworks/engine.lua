@@ -4,7 +4,7 @@ local light = require("fireworks.light")
 
 local api = vim.api
 local uv = vim.uv or vim.loop
-local floor, ceil, min, max, random = math.floor, math.ceil, math.min, math.max, math.random
+local floor, min, max, random = math.floor, math.min, math.max, math.random
 local set_extmark, del_extmark = api.nvim_buf_set_extmark, api.nvim_buf_del_extmark
 local rep = string.rep
 
@@ -192,42 +192,39 @@ local function build_filler_lines(l, queue, now)
 			table.insert(grouped[it.filler_row], it)
 		end
 	end
-	local nseg = ceil(l.width / light.SEGMENT)
 	local lines = {}
 	for fr = 0, l.filler_rows - 1 do
-		local items = grouped[fr]
-		if items then
-			table.sort(items, function(a, b)
-				return a.col < b.col
-			end)
+		local glyph_at = {}
+		for _, it in ipairs(grouped[fr] or {}) do
+			glyph_at[it.col] = it
 		end
 		local chunks = {}
-		local ii, pos = 1, 0
-		local lit = false
-		for seg = 0, nseg - 1 do
-			local c0 = seg * light.SEGMENT
-			local c1 = min(l.width, c0 + light.SEGMENT)
-			local hl = light.filler_tint(l.win, fr, seg, now)
-			lit = lit or hl ~= nil
-			hl = hl or "Normal"
-			while items and items[ii] and items[ii].col < c1 do
-				local it = items[ii]
-				if it.col > pos then
-					chunks[#chunks + 1] = { rep(" ", it.col - pos), hl }
-					pos = it.col
-				end
-				if it.col == pos then
-					chunks[#chunks + 1] = { it.char, it.hl }
-					pos = pos + 1
-				end
-				ii = ii + 1
-			end
-			if c1 > pos then
-				chunks[#chunks + 1] = { rep(" ", c1 - pos), hl }
-				pos = c1
+		local run_hl, run_len, lit = nil, 0, false
+		local function flush()
+			if run_len > 0 then
+				chunks[#chunks + 1] = { rep(" ", run_len), run_hl }
+				run_len = 0
 			end
 		end
-		lines[fr + 1] = (lit or items) and chunks or BLANK
+		for c = 0, l.width - 1 do
+			local it = glyph_at[c]
+			if it then
+				flush()
+				chunks[#chunks + 1] = { it.char, it.hl }
+				run_hl = nil
+			else
+				local hl = light.filler_hl(l.win, fr, c, now)
+				lit = lit or hl ~= nil
+				hl = hl or "Normal"
+				if hl ~= run_hl then
+					flush()
+					run_hl = hl
+				end
+				run_len = run_len + 1
+			end
+		end
+		flush()
+		lines[fr + 1] = (lit or grouped[fr]) and chunks or BLANK
 	end
 	return lines
 end

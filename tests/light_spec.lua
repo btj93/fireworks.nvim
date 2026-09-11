@@ -97,8 +97,15 @@ describe("fireworks.light effects", function()
 			layouts = { layout },
 		})
 		assert.is_true(#e.rows > 0)
-		for _, seg in ipairs(e.rows) do
-			assert.is_true(seg.d < 4)
+		for _, row in ipairs(e.rows) do
+			local any = false
+			for c = 0, row.width - 1 do
+				if row.d[c] then
+					any = true
+					assert.is_true(row.d[c] < 4)
+				end
+			end
+			assert.is_true(any)
 		end
 		assert.is_true(light.render(0))
 		local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, {})
@@ -124,8 +131,63 @@ describe("fireworks.light effects", function()
 			layouts = { layout },
 		})
 		assert.is_true(light.has_filler_tint(win))
-		assert.is_not_nil(light.filler_tint(win, 1, 0, 0))
-		assert.is_nil(light.filler_tint(win, 1, 6, 0))
-		assert.is_nil(light.filler_tint(win, 1, 0, 1))
+		assert.is_not_nil(light.filler_hl(win, 1, 5, 0))
+		assert.is_nil(light.filler_hl(win, 1, 60, 0))
+		assert.is_nil(light.filler_hl(win, 1, 5, 1))
+		assert.are_not.equal(light.filler_hl(win, 1, 5, 0), light.filler_hl(win, 1, 9, 0))
+	end)
+
+	it("grades a long line cell by cell into several runs", function()
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { string.rep("x", 70), "", "short" })
+		local layout = require("fireworks.layout").compute(win, buf)
+		light.new_effect({
+			kind = "light",
+			row = layout.screen_row,
+			col = layout.screen_col + 35,
+			palette = { "#ff00ff" },
+			radius = 20,
+			brightness = 1,
+			duration = 1,
+			bg = 0.25,
+			now = 0,
+			layouts = { layout },
+		})
+		light.render(0)
+		local ns = vim.api.nvim_create_namespace("fireworks_light")
+		local marks = vim.api.nvim_buf_get_extmarks(buf, ns, { 0, 0 }, { 0, -1 }, { details = true })
+		local groups, overlays = {}, 0
+		for _, m in ipairs(marks) do
+			local det = m[4]
+			if det.hl_group then
+				groups[det.hl_group] = true
+				assert.is_true(det.end_col > m[3], "run has width")
+			elseif det.virt_text then
+				overlays = overlays + 1
+				assert.is_true(det.virt_text_win_col >= 70)
+			end
+		end
+		assert.is_true(vim.tbl_count(groups) >= 4, "buckets on the text: " .. vim.tbl_count(groups))
+		assert.is_true(overlays >= 1, "past end of line is lit too")
+		local blank = vim.api.nvim_buf_get_extmarks(buf, ns, { 1, 0 }, { 1, -1 }, { details = true })
+		assert.is_true(#blank >= 2, "empty line is graded in overlay runs")
+	end)
+
+	it("maps display columns to bytes through tabs and multibyte text", function()
+		local b, dw = light.col_to_byte("\tab", 4)
+		assert.are.equal(6, dw)
+		assert.are.equal(0, b[0])
+		assert.are.equal(0, b[3])
+		assert.are.equal(1, b[4])
+		assert.are.equal(2, b[5])
+		assert.are.equal(3, b[6])
+		local b2, dw2 = light.col_to_byte("héllo", 8)
+		assert.are.equal(5, dw2)
+		assert.are.equal(1, b2[1])
+		assert.are.equal(3, b2[2])
+		assert.are.equal(6, b2[5])
+		local b3, dw3 = light.col_to_byte("plain", 8)
+		assert.are.equal(5, dw3)
+		assert.are.equal(4, b3[4])
+		assert.are.equal(5, b3[5])
 	end)
 end)
