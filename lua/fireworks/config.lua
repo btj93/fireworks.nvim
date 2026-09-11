@@ -49,6 +49,7 @@ M.defaults = {
 		attack_ms = 80,
 		duration_ms = 1000,
 		bg = 0.25,
+		fg = 1.0,
 	},
 	burn = {
 		duration_ms = 2000,

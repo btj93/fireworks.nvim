@@ -93,6 +93,7 @@ require("fireworks").setup({
     attack_ms = 80,
     duration_ms = 1000,
     bg = 0.25,
+    fg = 1.0,
   },
   burn = {
     duration_ms = 2000,
@@ -126,6 +127,7 @@ require("fireworks").setup({
 | `light.attack_ms` | Ramp from dark to peak as the shell opens. |
 | `light.duration_ms` | How long the light takes to ease out after the peak. |
 | `light.bg` | Fraction of the intensity also applied to the background, so blank cells and the area past end of line glow too. `0` tints foreground only. |
+| `light.fg` | Strength of the foreground blend. Text keeps its own syntax colour and is pushed toward the firework colour by this fraction of the intensity. `0` leaves foregrounds alone and lights the background only. |
 | `burn.duration_ms` | How long a failure's scorch lasts. |
 | `burn.color` | Ash colour the scorch blends toward. Rows adjacent to the impact take a darker soot shade. |
 | `burn.smoke` | Emit drifting `~` smoke from the impact point. |
@@ -139,8 +141,11 @@ visible non floating window. Every cell gets its own intensity bucket from its
 distance to the burst, and neighbouring cells with the same bucket are merged into
 one extmark, so a row is brighter on the side facing the light and the glow
 past end of line fades cell by cell. Buckets map to cached highlight
-groups whose foreground is `Normal` blended toward the palette colour, with a
-lighter touch of the same colour on the background. Two tone fireworks light
+groups whose foreground is the colour already on that cell, taken from the
+treesitter highlighter and from highlight extmarks such as LSP semantic tokens,
+blended toward the palette colour, with a lighter touch of the same colour on
+the background. Syntax colours stay readable while the light is on; a keyword
+just goes warmer. Two tone fireworks light
 each half of the screen with the colour that flew that way. Extmarks are set at
 priority 200 so the tint wins over treesitter while it lasts.
 

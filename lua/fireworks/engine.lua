@@ -87,6 +87,7 @@ local function shine(r, l, layouts, now)
 		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.light.duration_ms / 1000,
 		bg = cfg.light.bg,
+		fg = cfg.light.fg,
 		now = now,
 		layouts = layouts,
 	})
@@ -106,6 +107,7 @@ local function burn(r, l, layouts, now, strength, soot)
 		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.burn.duration_ms / 1000,
 		bg = cfg.light.bg,
+		fg = cfg.light.fg,
 		now = now,
 		layouts = layouts,
 	})

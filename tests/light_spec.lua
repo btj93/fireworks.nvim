@@ -172,6 +172,53 @@ describe("fireworks.light effects", function()
 		assert.is_true(#blank >= 2, "empty line is graded in overlay runs")
 	end)
 
+	it("blends from the highlight already on the cell", function()
+		light.reset_highlights()
+		vim.api.nvim_set_hl(0, "FireworksTestKeyword", { fg = "#0000ff" })
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local value = 1", "", "" })
+		local ns = vim.api.nvim_create_namespace("fireworks_test_marks")
+		vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { end_col = 5, hl_group = "FireworksTestKeyword", priority = 125 })
+		local layout = require("fireworks.layout").compute(win, buf)
+		local geometry = {}
+		for i, line in ipairs({ "local value = 1", "", "" }) do
+			local bytes, dw = light.col_to_byte(line, 8)
+			geometry[i - 1] = { bytes = bytes, dw = dw }
+		end
+		local base = light.base_highlights(layout, geometry)
+		assert.are.equal("FireworksTestKeyword", base[0][0])
+		assert.are.equal("FireworksTestKeyword", base[0][4])
+		assert.is_nil(base[0][5])
+		local tinted = light.tint_hl("#ff0000", 8, 0, "FireworksTestKeyword", 0.5)
+		local hl = vim.api.nvim_get_hl(0, { name = tinted, link = false })
+		assert.are.equal(tonumber("800080", 16), hl.fg)
+		local plain = light.tint_hl("#ff0000", 8, 0, nil, 0.5)
+		assert.are_not.equal(tinted, plain)
+		local off = light.tint_hl("#ff0000", 8, 0.25, "FireworksTestKeyword", 0)
+		assert.is_nil(vim.api.nvim_get_hl(0, { name = off, link = false }).fg)
+		vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+	end)
+
+	it("reads treesitter captures as base highlights", function()
+		if not pcall(vim.treesitter.language.add, "lua") then
+			pending("no lua parser")
+			return
+		end
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local value = 1", "return value", "" })
+		vim.bo[buf].filetype = "lua"
+		vim.treesitter.start(buf, "lua")
+		local layout = require("fireworks.layout").compute(win, buf)
+		local geometry = {}
+		for i, line in ipairs({ "local value = 1", "return value", "" }) do
+			local bytes, dw = light.col_to_byte(line, 8)
+			geometry[i - 1] = { bytes = bytes, dw = dw }
+		end
+		local base = light.base_highlights(layout, geometry)
+		assert.is_not_nil(base[0][0], "keyword `local` has a capture")
+		assert.is_true(base[0][0]:sub(1, 1) == "@")
+		assert.is_not_nil(base[1][0], "keyword `return` has a capture")
+		vim.treesitter.stop(buf)
+	end)
+
 	it("maps display columns to bytes through tabs and multibyte text", function()
 		local b, dw = light.col_to_byte("\tab", 4)
 		assert.are.equal(6, dw)
