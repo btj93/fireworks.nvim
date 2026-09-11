@@ -1,5 +1,5 @@
 local api = vim.api
-local floor, ceil, sqrt, min, max, atan2, pi = math.floor, math.ceil, math.sqrt, math.min, math.max, math.atan2, math.pi
+local floor, sqrt, min, max, atan2, pi = math.floor, math.sqrt, math.min, math.max, math.atan2, math.pi
 local set_extmark, del_extmark = api.nvim_buf_set_extmark, api.nvim_buf_del_extmark
 local rep, concat = string.rep, table.concat
 
@@ -68,11 +68,14 @@ function M.envelope(elapsed, attack, duration)
 	return M.ease_out((elapsed - attack) / duration)
 end
 
+---Nearest of eight steps. Rounding rather than ceiling gives the faintest
+---step a real threshold, so the lit edge contracts as the light decays
+---instead of staying on until the effect ends.
 function M.bucket(intensity)
 	if intensity <= 0 then
 		return 0
 	end
-	return min(M.BUCKETS, ceil(intensity * M.BUCKETS - 1e-9))
+	return min(M.BUCKETS, floor(intensity * M.BUCKETS + 0.5))
 end
 
 ---Palette entry for a direction. Angles are measured with `atan2(drow, dcol)`,

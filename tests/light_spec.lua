@@ -33,11 +33,35 @@ describe("fireworks.light math", function()
 	it("buckets intensity into eight steps with zero meaning no mark", function()
 		assert.are.equal(0, light.bucket(0))
 		assert.are.equal(0, light.bucket(-1))
-		assert.are.equal(1, light.bucket(0.01))
+		assert.are.equal(0, light.bucket(0.01))
+		assert.are.equal(0, light.bucket(0.06))
+		assert.are.equal(1, light.bucket(0.0625))
 		assert.are.equal(1, light.bucket(0.125))
-		assert.are.equal(2, light.bucket(0.13))
+		assert.are.equal(1, light.bucket(0.18))
+		assert.are.equal(2, light.bucket(0.19))
 		assert.are.equal(8, light.bucket(1))
 		assert.are.equal(8, light.bucket(5))
+	end)
+
+	it("lit radius contracts frame by frame as the light decays", function()
+		local radius, brightness = 25, 0.7
+		local function lit_extent(decay)
+			local extent = 0
+			for d = 0, radius, 0.25 do
+				if light.bucket(light.intensity(d, radius, brightness) * decay) > 0 then
+					extent = d
+				end
+			end
+			return extent
+		end
+		local previous = lit_extent(1)
+		assert.is_true(previous > 10)
+		for u = 0.1, 0.6, 0.1 do
+			local now = lit_extent(light.ease_out(u))
+			assert.is_true(now < previous, ("extent %.2f did not shrink at u=%.1f"):format(now, u))
+			previous = now
+		end
+		assert.are.equal(0, lit_extent(light.ease_out(0.9)))
 	end)
 
 	it("blends channels linearly", function()
@@ -143,7 +167,7 @@ describe("fireworks.light effects", function()
 		light.new_effect({
 			kind = "light",
 			row = layout.screen_row,
-			col = layout.screen_col + 35,
+			col = layout.screen_col + 60,
 			palette = { "#ff00ff" },
 			radius = 20,
 			brightness = 1,
