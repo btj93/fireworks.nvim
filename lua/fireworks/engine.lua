@@ -42,22 +42,39 @@ local function draw_cell(l, queue, y, x, glyph, hl)
 	end
 end
 
+local function screen_cell(l, y, x)
+	return layout_mod.to_screen(l, floor(y + 0.5), floor(x + 0.5))
+end
+
+local ROCKET_PALETTE = { rockets.ROCKET_COLOR }
+
 local function draw_rocket(r, l, queue)
+	local cfg = state.cfg
 	local hl = light.color_hl(rockets.ROCKET_COLOR)
 	for i, t in ipairs(r.trail) do
 		draw_cell(l, queue, t.y, t.x, rockets.ROCKET_TRAIL_GLYPHS[i] or ".", hl)
 	end
 	local head = rockets.ROCKET_HEAD
+	local glow = cfg.light.glow
 	if r.falling then
 		head = ","
+		glow = glow * 0.5
 	elseif r.hanging then
 		head = "."
 		hl = light.tint_hl(rockets.ROCKET_COLOR, 3, 0)
+		glow = glow * 0.3
 	end
 	draw_cell(l, queue, r.y, r.x, head, hl)
+	local srow, scol = screen_cell(l, r.y, r.x)
+	light.emit(srow, scol, cfg.light.glow_radius * 0.6, glow, ROCKET_PALETTE)
 end
 
 local function draw_particle(p, l, queue)
+	if not p.glyph then
+		local srow, scol = screen_cell(l, p.y, p.x)
+		local cfg = state.cfg
+		light.emit(srow, scol, cfg.light.glow_radius, cfg.light.glow * (1 - p.age / p.life), { p.color })
+	end
 	if not rockets.visible(p) then
 		return
 	end
@@ -70,46 +87,34 @@ local function draw_particle(p, l, queue)
 	draw_cell(l, queue, p.y, p.x, rockets.glyph(p), light.color_hl(p.color))
 end
 
-local function burst_screen(r, l)
-	return layout_mod.to_screen(l, floor(r.y + 0.5), floor(r.x + 0.5))
-end
-
-local function shine(r, l, layouts, now)
+local function shine(r, l, now)
 	local cfg = state.cfg
-	local row, col = burst_screen(r, l)
-	light.new_effect({
-		kind = "light",
+	local row, col = screen_cell(l, r.y, r.x)
+	light.flash({
 		row = row,
 		col = col,
 		palette = r.palette,
 		radius = cfg.light.radius * (rockets.glow(r) > 1 and 1.3 or 1),
-		brightness = cfg.light.brightness * (SIZE_GLOW[r.size] or 1) * rockets.glow(r),
+		strength = (SIZE_GLOW[r.size] or 1) * rockets.glow(r),
 		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.light.duration_ms / 1000,
-		bg = cfg.light.bg,
-		fg = cfg.light.fg,
 		now = now,
-		layouts = layouts,
 	})
 end
 
-local function burn(r, l, layouts, now, strength, soot)
+local function burn(r, l, now, strength, soot)
 	local cfg = state.cfg
-	local row, col = burst_screen(r, l)
-	light.new_effect({
-		kind = "burn",
+	local row, col = screen_cell(l, r.y, r.x)
+	light.flash({
 		row = row,
 		col = col,
 		palette = { cfg.burn.color },
 		soot = soot and light.blend(cfg.burn.color, "#000000", 0.45) or nil,
 		radius = cfg.light.radius * 0.6,
-		brightness = cfg.light.brightness * strength,
+		strength = strength,
 		attack = cfg.light.attack_ms / 1000,
 		duration = cfg.burn.duration_ms / 1000,
-		bg = cfg.light.bg,
-		fg = cfg.light.fg,
 		now = now,
-		layouts = layouts,
 	})
 end
 
@@ -119,7 +124,7 @@ local function append(list, items)
 	end
 end
 
-local function step_show(show, l, dt, now, layouts)
+local function step_show(show, l, dt, now)
 	local cfg = state.cfg
 	local queue = {}
 	show.queue = queue
@@ -131,21 +136,21 @@ local function step_show(show, l, dt, now, layouts)
 		if ev == "burst" then
 			if r.fail == "premature" then
 				append(spawned, rockets.sparks(r.x, r.y, 5, 3, 0.5, r.palette[1]))
-				burn(r, l, layouts, now, 1, true)
+				burn(r, l, now, 1, true)
 			elseif r.fail == "fizzle" then
 				append(spawned, rockets.sparks(r.x, r.y, 6, 2.5, 0.6, r.palette[1]))
-				burn(r, l, layouts, now, 0.3, false)
+				burn(r, l, now, 0.3, false)
 			else
 				append(spawned, rockets.flash(r, rockets.glow(r)))
 				append(spawned, rockets.burst(r))
-				shine(r, l, layouts, now)
+				shine(r, l, now)
 			end
 			if r.fail and cfg.burn.smoke then
 				append(spawned, rockets.smoke(r.x, r.y, 3))
 			end
 		elseif ev == "impact" then
 			append(spawned, rockets.sparks(r.x, r.y, 3, 1.5, 0.35, "#c0c0c0"))
-			burn(r, l, layouts, now, 1, true)
+			burn(r, l, now, 1, true)
 			if cfg.burn.smoke then
 				append(spawned, rockets.smoke(r.x, r.y, 4))
 			end
@@ -186,8 +191,11 @@ local function drop_filler(win)
 	end
 end
 
-local function build_filler_lines(l, queue, now)
+---Returns the virt_lines for a window's filler block and whether any of its
+---cells is lit or drawn on.
+local function build_filler_lines(l, queue)
 	local grouped = {}
+	local used = false
 	for _, it in ipairs(queue or {}) do
 		if it.filler_row >= 0 and it.filler_row < l.filler_rows then
 			grouped[it.filler_row] = grouped[it.filler_row] or {}
@@ -215,7 +223,7 @@ local function build_filler_lines(l, queue, now)
 				chunks[#chunks + 1] = { it.char, it.hl }
 				run_hl = nil
 			else
-				local hl = light.filler_hl(l.win, fr, c, now)
+				local hl = light.cell_hl(l, l.real_rows + fr, c)
 				lit = lit or hl ~= nil
 				hl = hl or "Normal"
 				if hl ~= run_hl then
@@ -226,30 +234,36 @@ local function build_filler_lines(l, queue, now)
 			end
 		end
 		flush()
-		lines[fr + 1] = (lit or grouped[fr]) and chunks or BLANK
+		if lit or grouped[fr] then
+			used = true
+			lines[fr + 1] = chunks
+		else
+			lines[fr + 1] = BLANK
+		end
 	end
-	return lines
+	return lines, used
 end
 
-local function render_fillers(layouts, glyphs, now)
+local function render_fillers(layouts, glyphs)
 	local seen = {}
 	for _, l in ipairs(layouts) do
-		local queue = glyphs[l.win]
-		local wants = l.filler_rows > 0 and ((queue and #queue > 0) or light.has_filler_tint(l.win))
-		if wants then
-			seen[l.win] = true
-			local f = state.fillers[l.win]
-			if f and f.buf ~= l.buf then
-				drop_filler(l.win)
-				f = nil
-			end
-			local ok, id = pcall(set_extmark, l.buf, ns_filler, l.last_row, 0, {
-				id = f and f.id or nil,
-				virt_lines = build_filler_lines(l, queue, now),
-				priority = 90,
-			})
-			if ok then
-				state.fillers[l.win] = { buf = l.buf, id = id }
+		if l.filler_rows > 0 then
+			local lines, used = build_filler_lines(l, glyphs[l.win])
+			if used then
+				seen[l.win] = true
+				local f = state.fillers[l.win]
+				if f and f.buf ~= l.buf then
+					drop_filler(l.win)
+					f = nil
+				end
+				local ok, id = pcall(set_extmark, l.buf, ns_filler, l.last_row, 0, {
+					id = f and f.id or nil,
+					virt_lines = lines,
+					priority = 90,
+				})
+				if ok then
+					state.fillers[l.win] = { buf = l.buf, id = id }
+				end
 			end
 		end
 	end
@@ -271,6 +285,7 @@ local function tick()
 		by_win[l.win] = l
 	end
 
+	light.begin_frame()
 	local glyphs = {}
 	for buf, show in pairs(state.shows) do
 		local l = by_win[show.win]
@@ -287,7 +302,7 @@ local function tick()
 		if not l then
 			state.shows[buf] = nil
 		else
-			step_show(show, l, dt, now, layouts)
+			step_show(show, l, dt, now)
 			glyphs[show.win] = show.queue
 			if #show.rockets == 0 and #show.particles == 0 then
 				state.shows[buf] = nil
@@ -295,8 +310,8 @@ local function tick()
 		end
 	end
 
-	local lit = light.render(now)
-	render_fillers(layouts, glyphs, now)
+	local lit = light.render(layouts, now, state.cfg.light)
+	render_fillers(layouts, glyphs)
 
 	if next(state.shows) == nil and not lit then
 		M.stop()

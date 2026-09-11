@@ -1,5 +1,5 @@
 local api = vim.api
-local floor, sqrt, min, max, atan2, pi = math.floor, math.sqrt, math.min, math.max, math.atan2, math.pi
+local floor, ceil, sqrt, min, max, atan2, pi = math.floor, math.ceil, math.sqrt, math.min, math.max, math.atan2, math.pi
 local set_extmark, del_extmark = api.nvim_buf_set_extmark, api.nvim_buf_del_extmark
 local rep, concat = string.rep, table.concat
 
@@ -8,11 +8,18 @@ local M = {}
 M.BUCKETS = 8
 M.PRIORITY = 200
 
+local STRIDE = 4096
+
 local ns = api.nvim_create_namespace("fireworks_light")
 local hl_cache = {}
 local base_fg_cache = {}
 local normal
-local effects = {}
+local settings = { brightness = 0.7, bg = 0.25, fg = 1 }
+
+local grid_i, grid_f, grid_c = {}, {}, {}
+local flashes = {}
+local base_cache = {}
+local active_rows = {}
 
 local function parse(hex)
 	return tonumber(hex:sub(2, 3), 16), tonumber(hex:sub(4, 5), 16), tonumber(hex:sub(6, 7), 16)
@@ -136,6 +143,7 @@ end
 function M.reset_highlights()
 	hl_cache = {}
 	base_fg_cache = {}
+	base_cache = {}
 	normal = nil
 end
 
@@ -195,10 +203,9 @@ end
 ---Highlight group in effect at every visible cell of a window, from the
 ---treesitter highlighter and from `hl_group` extmarks of any namespace (LSP
 ---semantic tokens, diagnostics, other plugins). Returns `base[row][col]`
----for window rows 0..real_rows-1, sparse, holding only groups that set a
----foreground. `rows` is the per-row `{bytes, dw}` from `col_to_byte`, and
----only window rows `first_row..last_row` (inclusive, default all real rows)
----are scanned.
+---for window rows, sparse, holding only groups that set a foreground.
+---`rows` is the per-row `{bytes, dw}` from `col_to_byte`, and only window
+---rows `first_row..last_row` (inclusive, default all real rows) are scanned.
 function M.base_highlights(l, rows, first_row, last_row)
 	first_row = first_row or 0
 	last_row = last_row or (l.real_rows - 1)
@@ -266,7 +273,7 @@ function M.base_highlights(l, rows, first_row, last_row)
 		for _, m in ipairs(marks) do
 			local d = m[4]
 			local hl = d.hl_group
-			if hl and d.ns_id ~= ns and not tostring(d.ns_id):find("fireworks") then
+			if hl and d.ns_id ~= ns then
 				if type(hl) == "table" then
 					hl = hl[#hl]
 				end
@@ -279,143 +286,144 @@ function M.base_highlights(l, rows, first_row, last_row)
 	return base
 end
 
----@class FireworksEffectOpts
----@field kind "light"|"burn"
----@field row integer screen row of the burst
----@field col integer screen col of the burst
----@field palette string[]
+---Per-window geometry and base highlights, recomputed when the window
+---scrolls, resizes, changes buffer, or the buffer changes.
+local function base_for(l)
+	local tick = api.nvim_buf_get_changedtick(l.buf)
+	local c = base_cache[l.win]
+	if c and c.buf == l.buf and c.topline == l.topline and c.botline == l.botline and c.width == l.width and c.tick == tick then
+		return c
+	end
+	local lines = {}
+	if l.real_rows > 0 then
+		local ok, got = pcall(api.nvim_buf_get_lines, l.buf, l.topline - 1, l.botline, false)
+		if ok then
+			lines = got
+		end
+	end
+	local tabstop = vim.bo[l.buf].tabstop
+	local geometry = {}
+	for i = 0, l.real_rows - 1 do
+		local bytes, dw = M.col_to_byte(lines[i + 1] or "", tabstop)
+		geometry[i] = { bytes = bytes, dw = dw }
+	end
+	local base = {}
+	if settings.fg > 0 and l.real_rows > 0 then
+		local ok, got = pcall(M.base_highlights, l, geometry)
+		if ok then
+			base = got
+		end
+	end
+	c = { buf = l.buf, topline = l.topline, botline = l.botline, width = l.width, tick = tick, geometry = geometry, base = base }
+	base_cache[l.win] = c
+	return c
+end
+
+---Forget this frame's light field. Call before emitting for a new frame.
+function M.begin_frame()
+	grid_i, grid_f, grid_c = {}, {}, {}
+end
+
+---Deposit light around screen cell (`row`, `col`): quadratic falloff over
+---`radius` rows (twice that in columns), peak `strength`. Colour comes from
+---`palette` by direction, or `soot` on the rows adjacent to the source.
+function M.emit(row, col, radius, strength, palette, soot)
+	if strength <= 0 then
+		return
+	end
+	local single = #palette == 1 and palette[1] or nil
+	local rr, cr = ceil(radius), ceil(radius * 2)
+	for dr = -rr, rr do
+		local srow = row + dr
+		if srow >= 0 then
+			local soot_row = soot and math.abs(dr) <= 1
+			local kbase = srow * STRIDE + col
+			for dc = -cr, cr do
+				if col + dc >= 0 then
+					local d = sqrt(dr * dr + dc * dc * 0.25)
+					if d < radius then
+						local f = 1 - d / radius
+						f = f * f * strength
+						local k = kbase + dc
+						grid_i[k] = (grid_i[k] or 0) + f
+						if f > (grid_f[k] or 0) then
+							grid_f[k] = f
+							grid_c[k] = soot_row and soot or single or M.color_at(palette, atan2(dr, dc * 0.5))
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+---@class FireworksFlash
+---@field row integer screen row
+---@field col integer screen col
 ---@field radius number
----@field brightness number
+---@field strength number
 ---@field attack number seconds
 ---@field duration number seconds
----@field bg number bg blend strength
----@field fg number|nil fg blend strength, default 1
+---@field palette string[]
+---@field soot string|nil
 ---@field now number
----@field layouts table[]
----@field soot string|nil darker colour for rows adjacent to a burn impact
 
----Per-cell distance and colour for one screen row of `width` cells starting
----at `screen_col`. Returns nil when no cell is inside the radius.
-local function row_cells(opts, radius, srow, screen_col, width)
-	local d, color, any = {}, {}, false
-	local soot = opts.soot and math.abs(srow - opts.row) <= 1
-	for c = 0, width - 1 do
-		local scol = screen_col + c
-		local dist = M.distance(opts.row, opts.col, srow, scol)
-		if dist < radius then
-			any = true
-			d[c] = dist
-			color[c] = soot and opts.soot or M.color_at(opts.palette, atan2(srow - opts.row, (scol - opts.col) * 0.5))
+---A burst flash: emitted every frame with its envelope until it fades.
+function M.flash(f)
+	flashes[#flashes + 1] = f
+end
+
+local function emit_flashes(now)
+	local alive = {}
+	for _, f in ipairs(flashes) do
+		local elapsed = now - f.now
+		if elapsed < f.attack + f.duration then
+			alive[#alive + 1] = f
+			M.emit(f.row, f.col, f.radius, f.strength * M.envelope(elapsed, f.attack, f.duration), f.palette, f.soot)
 		end
 	end
-	if any then
-		return d, color
+	flashes = alive
+	return #alive > 0
+end
+
+local function cell_bucket(k)
+	local v = grid_i[k]
+	if not v then
+		return 0
 	end
-	return nil
+	return M.bucket(settings.brightness * min(1, v))
 end
 
-function M.new_effect(opts)
-	local e = {
-		kind = opts.kind,
-		t0 = opts.now,
-		attack = opts.attack or 0,
-		duration = opts.duration,
-		radius = opts.radius,
-		brightness = opts.brightness,
-		bg = opts.bg,
-		fg = opts.fg == nil and 1 or opts.fg,
-		rows = {},
-		fillers = {},
-	}
-	local rows = e.rows
-	for _, l in ipairs(opts.layouts) do
-		local lines = {}
-		if l.real_rows > 0 then
-			local ok, got = pcall(api.nvim_buf_get_lines, l.buf, l.topline - 1, l.botline, false)
-			if ok then
-				lines = got
-			end
-		end
-		local tabstop = vim.bo[l.buf].tabstop
-		local lit, first_lit, last_lit = {}, nil, nil
-		for row = 0, l.total_rows - 1 do
-			local d, color = row_cells(opts, e.radius, l.screen_row + row, l.screen_col, l.width)
-			if d then
-				lit[row] = { d = d, color = color }
-				if row < l.real_rows then
-					first_lit = first_lit or row
-					last_lit = row
-				end
-			end
-		end
-		local geometry = {}
-		for i = first_lit or 0, last_lit or -1 do
-			local bytes, dw = M.col_to_byte(lines[i + 1] or "", tabstop)
-			geometry[i] = { bytes = bytes, dw = dw }
-		end
-		local base = {}
-		if e.fg > 0 and first_lit then
-			local ok, got = pcall(M.base_highlights, l, geometry, first_lit, last_lit)
-			if ok then
-				base = got
-			end
-		end
-		local fill = {}
-		for row = 0, l.total_rows - 1 do
-			local cell = lit[row]
-			if cell then
-				local d, color = cell.d, cell.color
-				if row < l.real_rows then
-					rows[#rows + 1] = {
-						buf = l.buf,
-						row0 = l.topline - 1 + row,
-						width = l.width,
-						dw = geometry[row].dw,
-						bytes = geometry[row].bytes,
-						base = base[row] or {},
-						d = d,
-						color = color,
-						marks = {},
-						key = "",
-					}
-				else
-					fill[row - l.real_rows] = { d = d, color = color }
-				end
-			end
-		end
-		e.fillers[l.win] = fill
+---Tint group for a window cell this frame, or nil when unlit. Valid after
+---`render` for the frame; used for the filler block below EOF.
+function M.cell_hl(l, row, col)
+	local k = (l.screen_row + row) * STRIDE + l.screen_col + col
+	local b = cell_bucket(k)
+	if b == 0 then
+		return nil
 	end
-	effects[#effects + 1] = e
-	return e
+	return M.tint_hl(grid_c[k], b, settings.bg, nil, settings.fg)
 end
 
-local function cell_bucket(e, d, decay)
-	return M.bucket(M.intensity(d, e.radius, e.brightness) * decay)
-end
-
-local function decay_of(e, now)
-	return M.envelope(now - e.t0, e.attack, e.duration)
-end
-
----Runs of consecutive cells sharing a bucket and colour: `{c0, c1, hl}` with
----`c1` exclusive. Unlit cells are left out.
-local function row_runs(e, row, decay)
+---Runs of consecutive cells sharing a bucket, colour, and base highlight:
+---`{c0, c1, hl}` with `c1` exclusive. Unlit cells are left out.
+local function row_runs(l, srow, base)
 	local runs = {}
 	local cur_b, cur_color, cur_base, start = 0, nil, nil, 0
-	local d, color, base = row.d, row.color, row.base
-	for c = 0, row.width do
-		local b, col, bs
-		if c < row.width then
-			local dist = d[c]
-			b = dist and cell_bucket(e, dist, decay) or 0
-			col = color[c]
-			bs = base[c]
-		else
-			b = 0
+	local kbase = srow * STRIDE + l.screen_col
+	for c = 0, l.width do
+		local b, col, bs = 0, nil, nil
+		if c < l.width then
+			local k = kbase + c
+			b = cell_bucket(k)
+			if b > 0 then
+				col = grid_c[k]
+				bs = base[c]
+			end
 		end
 		if b ~= cur_b or (b > 0 and (col ~= cur_color or bs ~= cur_base)) then
 			if cur_b > 0 then
-				runs[#runs + 1] = { start, c, M.tint_hl(cur_color, cur_b, e.bg, cur_base, e.fg) }
+				runs[#runs + 1] = { start, c, M.tint_hl(cur_color, cur_b, settings.bg, cur_base, settings.fg) }
 			end
 			cur_b, cur_color, cur_base, start = b, col, bs, c
 		end
@@ -423,34 +431,34 @@ local function row_runs(e, row, decay)
 	return runs
 end
 
-local function drop_row_marks(row)
-	if api.nvim_buf_is_valid(row.buf) then
-		for _, id in ipairs(row.marks) do
-			pcall(del_extmark, row.buf, ns, id)
+local function drop_row(entry)
+	if api.nvim_buf_is_valid(entry.buf) then
+		for _, id in ipairs(entry.ids) do
+			pcall(del_extmark, entry.buf, ns, id)
 		end
 	end
-	row.marks = {}
+	entry.ids = {}
 end
 
-local function set_row_marks(row, runs)
-	local marks = row.marks
-	local bytes, dw = row.bytes, row.dw
+local function set_row(entry, runs, geometry)
+	local ids = entry.ids
+	local bytes, dw = geometry.bytes, geometry.dw
 	for _, run in ipairs(runs) do
 		local c0, c1, hl = run[1], run[2], run[3]
 		if c0 < dw then
-			local ok, id = pcall(set_extmark, row.buf, ns, row.row0, bytes[c0], {
+			local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, bytes[c0], {
 				end_col = bytes[min(c1, dw)],
 				hl_group = hl,
 				priority = M.PRIORITY,
 				strict = false,
 			})
 			if ok then
-				marks[#marks + 1] = id
+				ids[#ids + 1] = id
 			end
 		end
 		if c1 > dw then
 			local from = max(c0, dw)
-			local ok, id = pcall(set_extmark, row.buf, ns, row.row0, 0, {
+			local ok, id = pcall(set_extmark, entry.buf, ns, entry.row0, 0, {
 				virt_text = { { rep(" ", c1 - from), hl } },
 				virt_text_pos = "overlay",
 				virt_text_win_col = from,
@@ -458,89 +466,71 @@ local function set_row_marks(row, runs)
 				strict = false,
 			})
 			if ok then
-				marks[#marks + 1] = id
+				ids[#ids + 1] = id
 			end
 		end
 	end
 end
 
-local function render_effect(e, now)
-	local decay = decay_of(e, now)
-	for _, row in ipairs(e.rows) do
-		local runs = row_runs(e, row, decay)
-		local parts = {}
-		for i, run in ipairs(runs) do
-			parts[i] = run[1] .. ":" .. run[2] .. ":" .. run[3]
-		end
-		local key = concat(parts, "|")
-		if key ~= row.key then
-			row.key = key
-			drop_row_marks(row)
-			if #runs > 0 and api.nvim_buf_is_valid(row.buf) then
-				set_row_marks(row, runs)
+---Paint this frame's light field onto every window. Returns true while
+---anything is lit or a flash is still alive.
+function M.render(layouts, now, light_cfg)
+	if light_cfg then
+		settings = light_cfg
+	end
+	local flashing = emit_flashes(now)
+	local seen = {}
+	local any = false
+	for _, l in ipairs(layouts) do
+		local cache = base_for(l)
+		for i = 0, l.real_rows - 1 do
+			local runs = row_runs(l, l.screen_row + i, cache.base[i] or {})
+			if #runs > 0 then
+				any = true
+				local row0 = l.topline - 1 + i
+				local id = l.win .. ":" .. l.buf .. ":" .. row0
+				seen[id] = true
+				local parts = {}
+				for j, run in ipairs(runs) do
+					parts[j] = run[1] .. ":" .. run[2] .. ":" .. run[3]
+				end
+				local key = concat(parts, "|")
+				local entry = active_rows[id]
+				if not entry then
+					entry = { buf = l.buf, row0 = row0, ids = {}, key = "" }
+					active_rows[id] = entry
+				end
+				if entry.key ~= key then
+					entry.key = key
+					drop_row(entry)
+					if api.nvim_buf_is_valid(l.buf) then
+						set_row(entry, runs, cache.geometry[i])
+					end
+				end
 			end
 		end
 	end
-end
-
-local function drop_marks(e)
-	for _, row in ipairs(e.rows) do
-		drop_row_marks(row)
-		row.key = ""
-	end
-end
-
----Advance every effect to `now`. Returns true while any effect is alive.
-function M.render(now)
-	local alive = {}
-	for _, e in ipairs(effects) do
-		if now - e.t0 >= e.attack + e.duration then
-			drop_marks(e)
-		else
-			render_effect(e, now)
-			alive[#alive + 1] = e
+	for id, entry in pairs(active_rows) do
+		if not seen[id] then
+			drop_row(entry)
+			active_rows[id] = nil
 		end
 	end
-	effects = alive
-	return #effects > 0
-end
-
----Highlight for one below-EOF filler cell of `win`, or nil when unlit.
-function M.filler_hl(win, filler_row, col, now)
-	local best, best_hl = 0, nil
-	for _, e in ipairs(effects) do
-		local fill = e.fillers[win]
-		local entry = fill and fill[filler_row]
-		local d = entry and entry.d[col]
-		if d then
-			local b = cell_bucket(e, d, decay_of(e, now))
-			if b > best then
-				best = b
-				best_hl = M.tint_hl(entry.color[col], b, e.bg, nil, e.fg)
-			end
-		end
-	end
-	return best_hl
-end
-
-function M.has_filler_tint(win)
-	for _, e in ipairs(effects) do
-		if e.fillers[win] and next(e.fillers[win]) then
-			return true
-		end
-	end
-	return false
+	return any or flashing
 end
 
 function M.active()
-	return #effects > 0
+	return #flashes > 0 or next(active_rows) ~= nil
 end
 
 function M.clear()
-	for _, e in ipairs(effects) do
-		drop_marks(e)
+	for _, entry in pairs(active_rows) do
+		drop_row(entry)
 	end
-	effects = {}
+	active_rows = {}
+	flashes = {}
+	base_cache = {}
+	grid_i, grid_f, grid_c = {}, {}, {}
 end
 
 return M

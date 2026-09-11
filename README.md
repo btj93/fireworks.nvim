@@ -91,9 +91,11 @@ require("fireworks").setup({
     radius = 25,
     brightness = 0.7,
     attack_ms = 80,
-    duration_ms = 1000,
+    duration_ms = 500,
     bg = 0.25,
     fg = 1.0,
+    glow = 0.35,
+    glow_radius = 6,
   },
   burn = {
     duration_ms = 2000,
@@ -122,12 +124,14 @@ require("fireworks").setup({
 | `fail_chance` | Probability that a rocket fails. The kind of failure is uniform over dud, premature, fizzle. |
 | `fps` | Animation frames per second. |
 | `max_particles` | Particle cap per show. A save while a running show is at the cap is dropped. |
-| `light.radius` | Reach of the burst light in rows. Columns count for half a row. Rows beyond it get no extmark. |
+| `light.radius` | Reach of the burst flash in rows. Columns count for half a row. Cells beyond it get no extmark. |
 | `light.brightness` | Peak blend toward the firework colour at the burst. Intensity is `brightness * (1 - d / radius)^2`. |
-| `light.attack_ms` | Ramp from dark to peak as the shell opens. |
-| `light.duration_ms` | How long the light takes to ease out after the peak. |
+| `light.attack_ms` | Ramp of the burst flash from dark to peak as the shell opens. |
+| `light.duration_ms` | How long the burst flash takes to ease out after its peak. The stars keep glowing for as long as they live. |
 | `light.bg` | Fraction of the intensity also applied to the background, so blank cells and the area past end of line glow too. `0` tints foreground only. |
 | `light.fg` | Strength of the foreground blend. Text keeps its own syntax colour and is pushed toward the firework colour by this fraction of the intensity. `0` leaves foregrounds alone and lights the background only. |
+| `light.glow` | Peak light each star sheds on the cells around it, fading with the star's age. Overlapping stars add up, so a fresh shell glows hardest at its heart. `0` leaves only the burst flash. |
+| `light.glow_radius` | Reach of one star's glow in rows, twice that in columns. |
 | `burn.duration_ms` | How long a failure's scorch lasts. |
 | `burn.color` | Ash colour the scorch blends toward. Rows adjacent to the impact take a darker soot shade. |
 | `burn.smoke` | Emit drifting `~` smoke from the impact point. |
@@ -135,12 +139,14 @@ require("fireworks").setup({
 
 ## How the light works
 
-On burst the plugin converts the burst cell to editor screen coordinates using
-the window position and text offset, then does the same for every row of every
-visible non floating window. Every cell gets its own intensity bucket from its
-distance to the burst, and neighbouring cells with the same bucket are merged into
-one extmark, so a row is brighter on the side facing the light and the glow
-past end of line fades cell by cell. Buckets map to cached highlight
+The light is a byproduct of the particles. Every frame each star deposits a
+small glow around its screen cell, scaled by its age, and the burst adds a short
+bright flash at the break point. Contributions add up into one light field in
+editor screen space, so the glow expands with the shell, drifts and droops with
+the stars, and dies with them. Every window then reads the field cell by cell:
+neighbouring cells with the same intensity bucket and colour are merged into one
+extmark, so a row is brighter on the side facing the light and the glow past end
+of line fades cell by cell. Buckets map to cached highlight
 groups whose foreground is the colour already on that cell, taken from the
 treesitter highlighter and from highlight extmarks such as LSP semantic tokens,
 blended toward the palette colour, with a lighter touch of the same colour on

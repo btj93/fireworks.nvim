@@ -47,9 +47,11 @@ M.defaults = {
 		radius = 25,
 		brightness = 0.7,
 		attack_ms = 80,
-		duration_ms = 1000,
+		duration_ms = 500,
 		bg = 0.25,
 		fg = 1.0,
+		glow = 0.35,
+		glow_radius = 6,
 	},
 	burn = {
 		duration_ms = 2000,

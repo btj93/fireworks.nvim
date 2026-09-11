@@ -106,79 +106,91 @@ describe("fireworks.light effects", function()
 		vim.api.nvim_win_set_buf(win, buf)
 	end)
 
-	it("marks only rows within the radius and drops them after the duration", function()
-		local layout = require("fireworks.layout").compute(win, buf)
-		local e = light.new_effect({
-			kind = "light",
-			row = layout.screen_row,
-			col = layout.screen_col,
-			palette = { "#00ff00" },
-			radius = 4,
-			brightness = 1,
-			duration = 1,
-			bg = 0.25,
-			now = 0,
-			layouts = { layout },
-		})
-		assert.is_true(#e.rows > 0)
-		for _, row in ipairs(e.rows) do
-			local any = false
-			for c = 0, row.width - 1 do
-				if row.d[c] then
-					any = true
-					assert.is_true(row.d[c] < 4)
-				end
-			end
-			assert.is_true(any)
+	local CFG = { brightness = 1, bg = 0.25, fg = 1 }
+	local ns = vim.api.nvim_create_namespace("fireworks_light")
+
+	local function marks_on(row)
+		if row then
+			return vim.api.nvim_buf_get_extmarks(buf, ns, { row, 0 }, { row, -1 }, { details = true })
 		end
-		assert.is_true(light.render(0))
-		local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, {})
+		return vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })
+	end
+
+	local function frame(layout, now, emit)
+		light.begin_frame()
+		if emit then
+			emit()
+		end
+		return light.render({ layout }, now, CFG)
+	end
+
+	it("a flash lights rows within its radius and is gone after its duration", function()
+		local layout = require("fireworks.layout").compute(win, buf)
+		light.flash({ row = layout.screen_row, col = layout.screen_col, palette = { "#00ff00" }, radius = 4, strength = 1, attack = 0, duration = 1, now = 0 })
+		assert.is_true(frame(layout, 0))
+		local marks = marks_on()
 		assert.is_true(#marks > 0)
-		assert.is_false(light.render(1.5))
-		marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, {})
-		assert.are.equal(0, #marks, vim.inspect(vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("fireworks_light"), 0, -1, { details = true })))
+		for _, m in ipairs(marks) do
+			assert.is_true(m[2] < 4, "row " .. m[2] .. " is outside the radius")
+		end
+		assert.is_false(frame(layout, 1.5))
+		assert.are.equal(0, #marks_on())
 	end)
 
-	it("tints filler rows below EOF per segment", function()
+	it("light follows an emitter from frame to frame", function()
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "aaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccc", "", "", "", "", "", "" })
+		local layout = require("fireworks.layout").compute(win, buf)
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 5, 1, 1, { "#ff0000" })
+		end)
+		assert.is_true(#marks_on(0) > 0)
+		assert.are.equal(0, #marks_on(2))
+		frame(layout, 0.03, function()
+			light.emit(layout.screen_row + 2, layout.screen_col + 5, 1, 1, { "#ff0000" })
+		end)
+		assert.are.equal(0, #marks_on(0))
+		assert.is_true(#marks_on(2) > 0)
+		assert.is_false(frame(layout, 0.06))
+		assert.are.equal(0, #marks_on())
+	end)
+
+	it("sums overlapping emitters and keeps the strongest colour", function()
+		local layout = require("fireworks.layout").compute(win, buf)
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 10, 1, 0.2, { "#ff0000" })
+		end)
+		local faint = marks_on(0)[1][4].hl_group
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 10, 1, 0.2, { "#ff0000" })
+			light.emit(layout.screen_row, layout.screen_col + 10, 1, 0.2, { "#ff0000" })
+			light.emit(layout.screen_row, layout.screen_col + 10, 1, 0.3, { "#00ff00" })
+		end)
+		local stacked = marks_on(0)[1][4].hl_group
+		assert.are_not.equal(faint, stacked)
+		assert.is_true(stacked:find("00ff00", 1, true) ~= nil, "strongest emitter sets the colour: " .. stacked)
+	end)
+
+	it("tints filler rows below EOF per cell", function()
 		local layout = require("fireworks.layout").compute(win, buf)
 		assert.is_true(layout.filler_rows > 2)
-		light.new_effect({
-			kind = "light",
-			row = layout.screen_row + layout.real_rows + 1,
-			col = layout.screen_col + 5,
-			palette = { "#0000ff" },
-			radius = 3,
-			brightness = 1,
-			duration = 1,
-			bg = 0.25,
-			now = 0,
-			layouts = { layout },
-		})
-		assert.is_true(light.has_filler_tint(win))
-		assert.is_not_nil(light.filler_hl(win, 1, 5, 0))
-		assert.is_nil(light.filler_hl(win, 1, 60, 0))
-		assert.is_nil(light.filler_hl(win, 1, 5, 1))
-		assert.are_not.equal(light.filler_hl(win, 1, 5, 0), light.filler_hl(win, 1, 9, 0))
+		local fr = layout.real_rows + 1
+		frame(layout, 0, function()
+			light.emit(layout.screen_row + fr, layout.screen_col + 5, 3, 1, { "#0000ff" })
+		end)
+		assert.is_not_nil(light.cell_hl(layout, fr, 5))
+		assert.is_nil(light.cell_hl(layout, fr, 60))
+		assert.are_not.equal(light.cell_hl(layout, fr, 5), light.cell_hl(layout, fr, 9))
+		frame(layout, 0.03)
+		assert.is_nil(light.cell_hl(layout, fr, 5))
 	end)
 
 	it("grades a long line cell by cell into several runs", function()
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { string.rep("x", 70), "", "short" })
 		local layout = require("fireworks.layout").compute(win, buf)
-		light.new_effect({
-			kind = "light",
-			row = layout.screen_row,
-			col = layout.screen_col + 60,
-			palette = { "#ff00ff" },
-			radius = 20,
-			brightness = 1,
-			duration = 1,
-			bg = 0.25,
-			now = 0,
-			layouts = { layout },
-		})
-		light.render(0)
-		local ns = vim.api.nvim_create_namespace("fireworks_light")
-		local marks = vim.api.nvim_buf_get_extmarks(buf, ns, { 0, 0 }, { 0, -1 }, { details = true })
+		frame(layout, 0, function()
+			light.emit(layout.screen_row, layout.screen_col + 60, 20, 1, { "#ff00ff" })
+		end)
+		local marks = marks_on(0)
 		local groups, overlays = {}, 0
 		for _, m in ipairs(marks) do
 			local det = m[4]
@@ -200,8 +212,8 @@ describe("fireworks.light effects", function()
 		light.reset_highlights()
 		vim.api.nvim_set_hl(0, "FireworksTestKeyword", { fg = "#0000ff" })
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local value = 1", "", "" })
-		local ns = vim.api.nvim_create_namespace("fireworks_test_marks")
-		vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { end_col = 5, hl_group = "FireworksTestKeyword", priority = 125 })
+		local marks_ns = vim.api.nvim_create_namespace("fireworks_test_marks")
+		vim.api.nvim_buf_set_extmark(buf, marks_ns, 0, 0, { end_col = 5, hl_group = "FireworksTestKeyword", priority = 125 })
 		local layout = require("fireworks.layout").compute(win, buf)
 		local geometry = {}
 		for i, line in ipairs({ "local value = 1", "", "" }) do
@@ -219,7 +231,7 @@ describe("fireworks.light effects", function()
 		assert.are_not.equal(tinted, plain)
 		local off = light.tint_hl("#ff0000", 8, 0.25, "FireworksTestKeyword", 0)
 		assert.is_nil(vim.api.nvim_get_hl(0, { name = off, link = false }).fg)
-		vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+		vim.api.nvim_buf_clear_namespace(buf, marks_ns, 0, -1)
 	end)
 
 	it("reads treesitter captures as base highlights", function()
