@@ -1,0 +1,318 @@
+*fireworks.txt*  Fireworks in your buffer every time you save
+
+Author:   btj93  <https://github.com/btj93/fireworks.nvim>
+License:  Apache-2.0 (see LICENSE)
+
+==============================================================================
+CONTENTS                                                  *fireworks-contents*
+
+  1. Introduction and Requirements ............................|fireworks.nvim|
+  2. Setup ...................................................|fireworks-setup|
+  3. Configuration ..........................................|fireworks-config|
+  4. Commands .............................................|fireworks-commands|
+  5. Shell types .............................................|fireworks-types|
+  6. Failures .............................................|fireworks-failures|
+  7. How the light works .....................................|fireworks-light|
+  8. Lua API ...................................................|fireworks-api|
+  9. Highlights .........................................|fireworks-highlights|
+
+==============================================================================
+1. Introduction and Requirements                              *fireworks.nvim*
+
+fireworks.nvim launches fireworks in your buffer every time you save. It is
+a joke UI plugin. Nothing it draws touches the text in your file: everything
+is virtual text and highlight extmarks in the plugin's own namespaces, and
+they are cleared when the show ends.
+
+A rocket climbs from the bottom row of the window, slows as it nears its
+apex, hangs dark for a beat, and breaks somewhere in the top 60 percent of
+the window. The stars that fly out light up the text around them, and that
+light falls on every visible window, not only the one you saved.
+
+Requirements                                           *fireworks-requirements*
+
+Neovim 0.10 or newer. Tested against 0.10, 0.11, and stable.
+
+On 0.11 and newer, lines hidden with `conceal_lines` are accounted for, so
+plugins that collapse blocks that way stay aligned with the effect.
+
+==============================================================================
+2. Setup                                                     *fireworks-setup*
+
+With lazy.nvim: >lua
+
+    {
+      "btj93/fireworks.nvim",
+      event = "VeryLazy",
+      opts = {},
+    }
+<
+Or call setup directly: >lua
+
+    require("fireworks").setup({})
+<
+Calling |fireworks.setup()| is what registers the save trigger. Without it
+the |:Fireworks| command still works, because `plugin/fireworks.lua` defines
+it as a stub that runs setup on first use.
+
+==============================================================================
+3. Configuration                                            *fireworks-config*
+
+Every key is optional. The values below are the defaults. >lua
+
+    require("fireworks").setup({
+      events = { "BufWritePost" },
+      launch_chance = 1.0,
+      rockets = { min = 1, max = 3 },
+      stagger = { first = { 0.3, 0.8 }, between = { 0.4, 1.4 } },
+      types = {
+        peony = 4,
+        chrysanthemum = 3,
+        willow = 2,
+        ring = 2,
+        crossette = 2,
+        crackle = 2,
+        pistil = 2,
+        palm = 2,
+        kamuro = 1,
+        salute = 1,
+      },
+      palettes = { single = 4, two_tone = 3, rainbow = 2, gold = 2 },
+      sizes = { small = 3, medium = 4, large = 2 },
+      colors = {
+        "#ff5f5f", "#ff9f43", "#ffe66d", "#7bed9f",
+        "#70a1ff", "#a29bfe", "#ff6bcb", "#eaeaea",
+      },
+      gold = { "#ffd700", "#ffb347", "#fff1a8" },
+      fail_chance = 0.05,
+      fps = 30,
+      max_particles = 400,
+      light = {
+        radius = 25,
+        brightness = 0.7,
+        attack_ms = 80,
+        duration_ms = 900,
+        bg = 0.25,
+        fg = 1.0,
+        glow = 0.35,
+        glow_radius = 6,
+      },
+      burn = {
+        duration_ms = 2000,
+        color = "#6b5d4f",
+        smoke = true,
+      },
+      ignore_filetypes = { "help", "qf", "lazy", "mason", --[[ ... ]] },
+    })
+<
+                                                    *fireworks-config-options*
+events ~
+    Autocommand events that launch a show. Only normal listed file buffers
+    qualify: a non-empty 'buftype' is always skipped. Set to `{}` to disable
+    the save trigger and launch only with |:Fireworks|.
+
+launch_chance ~
+    Probability in [0, 1] that a qualifying save launches at all. Lower it
+    if every save is too much.
+
+rockets ~
+    Inclusive `{min, max}` range of rockets per save.
+
+stagger ~
+    Seconds before the first rocket leaves, and between later ones, each as
+    a `{min, max}` range.
+
+types ~
+    Weights for the burst types, see |fireworks-types|. A weight of `0`
+    removes a type.
+
+palettes ~
+    Weights for colour schemes. `single` is one random colour from `colors`,
+    `two_tone` two of them, `rainbow` the whole list, `gold` the `gold` list.
+
+sizes ~
+    Weights for burst radius: `small`, `medium`, `large`.
+
+colors ~
+    Colours drawn from for `single`, `two_tone`, and `rainbow`.
+
+gold ~
+    Colours used by the `gold` palette and by the `kamuro` type.
+
+fail_chance ~
+    Probability that a rocket fails, see |fireworks-failures|.
+
+fps ~
+    Animation frames per second.
+
+max_particles ~
+    Particle cap per show. A save while a running show is at the cap is
+    dropped rather than queued.
+
+light.radius ~
+    Reach of the burst flash in rows. Columns count for half a row, so the
+    lit area is twice as wide as it is tall.
+
+light.brightness ~
+    Scales the whole light field. Cells at full intensity reach this value.
+
+light.attack_ms ~
+    Ramp of the burst flash from dark to peak as the shell opens.
+
+light.duration_ms ~
+    How long the burst flash takes to fade after its peak. The stars keep
+    glowing for as long as they live, so this is not the length of the show.
+
+light.bg ~
+    Fraction of the intensity also applied to the background. This is what
+    makes blank cells and the area past end of line glow. Set to `0` to tint
+    foregrounds only.
+
+light.fg ~
+    Strength of the foreground blend. Text keeps its own syntax colour and is
+    pushed toward the firework colour by this fraction of the intensity. Set
+    to `0` to leave foregrounds alone and light the background only.
+
+light.glow ~
+    Peak light each star sheds on the cells around it, fading with the star's
+    age. Overlapping stars add up, so a fresh shell glows hardest at its
+    heart. Set to `0` to leave only the burst flash.
+
+light.glow_radius ~
+    Reach of one star's glow in rows, twice that in columns.
+
+burn.duration_ms ~
+    How long a failure's scorch lasts.
+
+burn.color ~
+    Ash colour the scorch blends toward. Rows next to the impact take a
+    darker soot shade of it.
+
+burn.smoke ~
+    Emit drifting `~` smoke particles from the impact point.
+
+ignore_filetypes ~
+    Filetypes that never launch on save.
+
+==============================================================================
+4. Commands                                               *fireworks-commands*
+
+                                                                  *:Fireworks*
+:Fireworks              Launch a show over the current buffer now.
+
+:Fireworks {type}       Force a shell type, see |fireworks-types|.
+
+:Fireworks fail         Force a random failure. `dud`, `premature`, and
+                        `fizzle` pick a specific one.
+
+:Fireworks toggle       Arm or disarm the save trigger. The command itself
+                        keeps working while disarmed.
+
+:Fireworks stop         Clear a running show immediately.
+
+Completion offers every type name, the failure names, `toggle`, and `stop`.
+
+==============================================================================
+5. Shell types                                               *fireworks-types*
+
+peony           Plain radial break.
+chrysanthemum   Radial, with every star leaving a trail.
+willow          Heavy drag and a long life, so it droops and hangs.
+ring            Every star at one speed, so the break is a single circle.
+crossette       Each star splits into four at half its life.
+crackle         Stars twinkle on and off as they fall.
+pistil          A second, slower break in another colour inside the first.
+palm            Seven thick arms that rise and droop, trails on each.
+kamuro          A gold willow with very long trails.
+salute          No stars at all. A large flash and a wide, bright light.
+
+Size and palette are rolled separately for every rocket, so the same type
+looks different each time.
+
+==============================================================================
+6. Failures                                               *fireworks-failures*
+
+About one rocket in twenty fails, see `fail_chance`.
+
+dud             Sputters part way up, falls back down under gravity, and
+                pops with a few sparks where it lands.
+premature       Breaks one row above the tube, right where it launched.
+fizzle          A handful of sparks and almost no light.
+
+Failures scorch instead of lighting: the tint blends toward `burn.color`
+rather than a firework colour, the rows next to the impact take a darker
+soot shade, and the mark lasts for `burn.duration_ms`. With `burn.smoke`
+enabled, a little smoke drifts up from the impact point.
+
+==============================================================================
+7. How the light works                                       *fireworks-light*
+
+The light is a byproduct of the stars, not a separate animation.
+
+Every frame each star deposits a small quadratic glow around its own screen
+cell, scaled by how much life it has left, and the burst adds a short bright
+flash at the break point. All of these contributions add into one light field
+in editor screen space. Where two colours overlap, the cell takes their
+intensity-weighted mean, so a two-tone shell blends through its seam instead
+of splitting at it.
+
+Every visible window then reads that field cell by cell. Neighbouring cells
+with the same intensity bucket and colour are merged into a single extmark,
+so a row is brighter on the side facing the light, and the glow past end of
+line fades cell by cell rather than in blocks.
+
+The tint starts from the colour a cell already has. Treesitter captures and
+`hl_group` extmarks from any namespace, including LSP semantic tokens, are
+read once and cached per window, so a keyword stays a keyword colour and just
+goes warmer while it is lit. Inline and end-of-line virtual text from other
+plugins is lit too, by drawing an overlay copy of the same text with the
+original highlight stacked under the tint.
+
+Rows are located with |screenpos()|, so lines hidden by `conceal_lines`,
+closed folds, wrapped continuation rows, and other plugins' `virt_lines` do
+not shift the effect below them. Those rows get no stars and no light of
+their own, since there is nothing of the buffer on them.
+
+Windows shorter than 10 rows or narrower than 20 columns are skipped, and
+floating windows are never decorated.
+
+==============================================================================
+8. Lua API                                                     *fireworks-api*
+
+                                                         *fireworks.setup()*
+require("fireworks").setup({opts})
+    Merge {opts} over the defaults, register the save trigger, and define
+    |:Fireworks|. Safe to call again to change configuration.
+
+                                                        *fireworks.launch()*
+require("fireworks").launch({opts})
+    Launch a show over the current buffer. {opts} may set `type`, `fail`, and
+    `count`. Returns `false` if no eligible window was found or a running
+    show is already at the particle cap.
+
+                                                        *fireworks.toggle()*
+require("fireworks").toggle()
+    Arm or disarm the save trigger. Returns the new state.
+
+                                                          *fireworks.stop()*
+require("fireworks").stop()
+    Clear a running show immediately.
+
+                                                       *fireworks.on_write()*
+require("fireworks").on_write({buf})
+    The save handler. Applies the ignore list and `launch_chance`, then
+    launches. Call it yourself to drive the plugin from your own autocommand.
+
+==============================================================================
+9. Highlights                                           *fireworks-highlights*
+
+The plugin defines its highlight groups at runtime rather than reading them
+from your colourscheme, because every group is a blend of a firework colour
+with whatever was already on the cell. Groups are rebuilt on |ColorScheme|.
+
+Stars are drawn with `FireworksC{hex}`. Tints are `FireworksL{hex}_...`, one
+per colour, intensity bucket, blend strength, and underlying highlight group.
+Overriding them by hand is not useful; change `colors`, `light.fg`, and
+`light.bg` instead.
+
+vim:tw=78:ts=8:noet:ft=help:norl:

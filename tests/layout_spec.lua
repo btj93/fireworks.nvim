@@ -45,34 +45,54 @@ describe("fireworks.layout", function()
 		assert.is_false(layout.is_plain_buffer(buf, {}))
 	end)
 
-	it("maps rows through concealed lines, folds, and virtual lines", function()
+	it("maps rows through closed folds and virtual lines", function()
 		local lines = {}
 		for i = 1, 12 do
 			lines[i] = ("line %d"):format(i)
 		end
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 		local ns = vim.api.nvim_create_namespace("layout_spec_marks")
+		vim.wo[win].foldmethod = "manual"
+		vim.cmd("4,5fold")
+		vim.api.nvim_buf_set_extmark(buf, ns, 6, 0, { virt_lines = { { { "virtual", "Comment" } } } })
+		vim.cmd("redraw")
+		local l = layout.compute(win, buf)
+		assert.are.equal(1, l.rows[0])
+		assert.are.equal(3, l.rows[2])
+		assert.are.equal(4, l.rows[3], "closed fold shows its first line")
+		assert.is_true(l.fold[3])
+		assert.is_nil(l.row_of[5], "the folded-away line has no row of its own")
+		assert.are.equal(6, l.rows[4])
+		assert.are.equal(7, l.rows[5])
+		assert.is_nil(l.rows[6], "virtual line row belongs to no buffer line")
+		assert.are.equal(8, l.rows[7])
+		assert.are.equal(12, l.real_rows)
+		assert.are.equal(l.height - 12, l.filler_rows)
+		vim.cmd("normal! zE")
+		vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+	end)
+
+	it("maps rows through lines hidden by conceal_lines", function()
+		if vim.fn.has("nvim-0.11") == 0 then
+			pending("conceal_lines needs Neovim 0.11")
+			return
+		end
+		local lines = {}
+		for i = 1, 12 do
+			lines[i] = ("line %d"):format(i)
+		end
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+		local ns = vim.api.nvim_create_namespace("layout_spec_conceal")
 		vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, { end_row = 5, conceal_lines = "" })
 		vim.wo[win].conceallevel = 2
-		vim.wo[win].foldmethod = "manual"
-		vim.cmd("8,9fold")
-		vim.api.nvim_buf_set_extmark(buf, ns, 10, 0, { virt_lines = { { { "virtual", "Comment" } } } })
 		vim.cmd("redraw")
 		local l = layout.compute(win, buf)
 		assert.are.equal(1, l.rows[0])
 		assert.are.equal(2, l.rows[1])
 		assert.are.equal(7, l.rows[2], "lines 3 to 6 are concealed, line 7 takes row 2")
-		assert.is_nil(l.row_of[4])
-		assert.are.equal(8, l.rows[3], "closed fold shows its first line")
-		assert.is_true(l.fold[3])
-		assert.is_nil(l.row_of[9])
-		assert.are.equal(10, l.rows[4])
-		assert.are.equal(11, l.rows[5])
-		assert.is_nil(l.rows[6], "virtual line row belongs to no buffer line")
-		assert.are.equal(12, l.rows[7])
+		assert.is_nil(l.row_of[4], "a concealed line has no row")
 		assert.are.equal(8, l.real_rows)
 		assert.are.equal(l.height - 8, l.filler_rows)
-		vim.cmd("normal! zE")
 		vim.wo[win].conceallevel = 0
 		vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 	end)

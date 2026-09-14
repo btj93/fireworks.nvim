@@ -1,21 +1,31 @@
 # fireworks.nvim
 
+[![CI](https://github.com/btj93/fireworks.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/btj93/fireworks.nvim/actions/workflows/ci.yml)
+
 Fireworks in your buffer every time you save. A joke UI plugin drawn on an
 extmark canvas: overlay virtual text on real lines and a `virt_lines` block
 that claims the blank rows below EOF, so a three line file still fills the window.
 
+![A save launching three shells over a Lua buffer, with the light falling across both split windows](assets/demo.gif)
+
 A rocket climbs from the bottom row, slows as it nears its apex, hangs dark for a
 beat, and breaks somewhere in the top 60 percent. The light of the burst falls on
-every visible window. Text near the burst is
+every visible window, not only the one you saved. Text near the burst is
 tinted toward the firework's own colour, brighter on the side facing it, and
 fades out over about a second. About one in twenty rockets fails: a dud that sputters and
 falls back, a premature pop right above the tube, or a fizzle. Failures scorch
 instead of lighting, leaving an ash coloured burn and a little smoke for two
 seconds.
 
+Nothing it draws touches your file. Every glyph and every tint is an extmark in
+the plugin's own namespaces, cleared when the show ends.
+
 ## Requirements
 
-Neovim 0.10 or newer.
+Neovim 0.10 or newer. Tested against 0.10, 0.11, and stable on every push.
+
+On 0.11 and newer, lines hidden with `conceal_lines` are accounted for, so
+plugins that collapse blocks that way stay aligned with the effect.
 
 ## Installation
 
@@ -168,6 +178,11 @@ virtual text are left alone, since their drawing order is not knowable.
 Windows shorter than 10 rows or narrower than 20 columns are skipped. Rendering
 never raises inside the autocommand; every extmark write is wrapped in `pcall`.
 
+## Documentation
+
+`:help fireworks` covers the same ground as this README, plus the Lua API and
+the highlight groups.
+
 ## Development
 
 ```sh
@@ -176,6 +191,10 @@ make lint          # luacheck
 make format        # stylua
 make format-check
 ```
+
+CI runs all three against Neovim 0.10.4, 0.11.4, stable, and nightly. Nightly
+is informational and cannot fail the build; the pinned versions and stable must
+stay green.
 
 ## License
 

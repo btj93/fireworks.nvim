@@ -299,6 +299,9 @@ function M.base_highlights(l, rows)
 		end
 	end
 
+	-- `highlighter.active` is private. The whole function runs under pcall in
+	-- `base_for`, so if it ever disappears the tint just blends from Normal fg
+	-- instead of from the colour a token already has.
 	if vim.treesitter.highlighter.active[l.buf] then
 		local ok, parser = pcall(vim.treesitter.get_parser, l.buf)
 		if ok and parser then
@@ -741,10 +744,6 @@ function M.render(layouts, now, light_cfg)
 		end
 	end
 	return any or flashing
-end
-
-function M.active()
-	return #flashes > 0 or next(active_rows) ~= nil
 end
 
 function M.clear()

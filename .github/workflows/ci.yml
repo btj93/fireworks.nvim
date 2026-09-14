@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (nvim ${{ matrix.neovim-version }})
+    runs-on: ubuntu-latest
+    # Nightly is informational: a broken upstream nightly should not fail the
+    # badge or block merges. The pinned floor and stable must stay green.
+    continue-on-error: ${{ matrix.neovim-version == 'nightly' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim-version: ['v0.10.4', 'v0.11.4', 'stable', 'nightly']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim-version }}
+
+      - name: Cache plenary.nvim
+        uses: actions/cache@v4
+        with:
+          path: /tmp/plenary.nvim
+          key: plenary-${{ runner.os }}-v1
+
+      - name: Run tests
+        run: make test
+
+  lint:
+    name: luacheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luarocks
+          sudo luarocks install luacheck
+
+      - name: Run luacheck
+        run: make lint
+
+  format:
+    name: stylua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Pinned to a concrete release so formatting cannot drift under us.
+          # Bump deliberately, and reformat in the same commit.
+          version: 2.5.2
+          args: --check lua/ plugin/ tests/
+
+  docs:
+    name: helptags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Generate helptags
+        run: nvim --headless -c 'helptags doc' -c 'q'

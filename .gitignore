@@ -2,3 +2,6 @@
 .luacheckcache
 *.swp
 *~
+
+# generated helptags (doc/fireworks.txt is committed; its tags file is not)
+doc/tags
