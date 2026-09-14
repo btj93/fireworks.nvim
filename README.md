@@ -199,6 +199,19 @@ CI runs all three against Neovim 0.10.4, 0.11.4, stable, and nightly. Nightly
 is informational and cannot fail the build; the pinned versions and stable must
 stay green.
 
+## Credits
+
+The idea and the drawing technique come from
+[starfall.nvim](https://github.com/RedEye-Developers/starfall.nvim). Claiming
+the blank rows below the last line with a `virt_lines` block, so a short file
+still has somewhere for things to happen, is theirs.
+
+The two run side by side happily on a file long enough to fill the window. On a
+short file they both want the space below the last line, and only one of them
+gets it: Neovim renders whichever block comes first and pushes the other off
+screen. Nothing errors, but expect part of a show to be hidden while starfall
+is running over a short buffer.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).

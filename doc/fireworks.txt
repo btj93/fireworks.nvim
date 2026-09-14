@@ -15,6 +15,7 @@ CONTENTS                                                  *fireworks-contents*
   7. How the light works .....................................|fireworks-light|
   8. Lua API ...................................................|fireworks-api|
   9. Highlights .........................................|fireworks-highlights|
+ 10. Credits ...............................................|fireworks-credits|
 
 ==============================================================================
 1. Introduction and Requirements                              *fireworks.nvim*
@@ -323,5 +324,22 @@ Stars are drawn with `FireworksC{hex}`. Tints are `FireworksL{hex}_...`, one
 per colour, intensity bucket, blend strength, and underlying highlight group.
 Overriding them by hand is not useful; change `colors`, `light.fg`, and
 `light.bg` instead.
+
+==============================================================================
+10. Credits                                                *fireworks-credits*
+
+The idea and the drawing technique come from starfall.nvim:
+
+    https://github.com/RedEye-Developers/starfall.nvim
+
+Claiming the blank rows below the last line with a `virt_lines` block, so a
+short file still has somewhere for things to happen, is theirs.
+
+                                                     *fireworks-with-starfall*
+The two run side by side happily on a file long enough to fill the window. On
+a short file they both want the space below the last line and only one of them
+gets it: Neovim renders whichever block comes first and pushes the other off
+screen. Nothing errors, but expect part of a show to be hidden while starfall
+is running over a short buffer.
 
 vim:tw=78:ts=8:noet:ft=help:norl:
