@@ -6,6 +6,7 @@ M.defaults = {
 	launch_chance = 1.0,
 	rockets = { min = 1, max = 3 },
 	stagger = { first = { 0.3, 0.8 }, between = { 0.4, 1.4 } },
+	tail_tint = 1.0,
 	types = {
 		peony = 4,
 		chrysanthemum = 3,

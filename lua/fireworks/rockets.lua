@@ -86,6 +86,21 @@ function M.palette(kind, cfg)
 	return { colors[random(1, #colors)] }
 end
 
+---Comet tail colours, nearest the head first. The head keeps the lift
+---charge's gold; the trail behind it is already mostly the shell's colour
+---and reaches it fully at the end, the way a real coloured comet burns its
+---composition along the whole tail with only the tip running hot. Ramping
+---from zero instead leaves four of the five cells indistinguishable from
+---gold, which reads as no tail colour at all.
+function M.tail_colors(color, tint)
+	local out = {}
+	local n = #M.ROCKET_TRAIL_GLYPHS
+	for i = 1, n do
+		out[i] = light.blend(M.ROCKET_COLOR, color, (tint or 0) * (0.5 + 0.5 * i / n))
+	end
+	return out
+end
+
 ---Deceleration that brings a rocket from launch speed to the stall speed
 ---exactly at the target row.
 function M.climb_decel(distance)
@@ -145,6 +160,9 @@ function M.new_rocket(layout, cfg, opts)
 	if fail == "dud" then
 		r.sputter_y = launch_y - (launch_y - target_y) * (0.4 + random() * 0.3)
 	end
+	local tail_color = r.palette[random(1, #r.palette)]
+	r.tail = M.tail_colors(tail_color, cfg.tail_tint)
+	r.glow_palette = { light.blend(M.ROCKET_COLOR, tail_color, (cfg.tail_tint or 0) * 0.5) }
 	return r
 end
 

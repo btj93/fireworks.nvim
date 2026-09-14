@@ -48,6 +48,51 @@ end)
 describe("rockets.rockets physics", function()
 	local layout = { width = 80, total_rows = 40 }
 
+	it("cools the comet tail from gold into the shell colour", function()
+		local tail = rockets.tail_colors("#0000ff", 0.6)
+		assert.are.equal(#rockets.ROCKET_TRAIL_GLYPHS, #tail)
+		local function blue(hex)
+			return tonumber(hex:sub(6, 7), 16)
+		end
+		for i = 2, #tail do
+			assert.is_true(blue(tail[i]) > blue(tail[i - 1]), "cell " .. i .. " is further toward the shell colour")
+		end
+		assert.are_not.equal(rockets.ROCKET_COLOR, tail[1])
+		assert.are_not.equal("#0000ff", tail[#tail], "never reaches the shell colour at tint 0.6")
+	end)
+
+	it("runs the shell colour along the trail at full tint", function()
+		local tail = rockets.tail_colors("#0000ff", 1)
+		assert.are.equal("#0000ff", tail[#tail], "the tail end is the shell colour exactly")
+		local function dist(a, b)
+			local d = 0
+			for i = 2, 6, 2 do
+				d = d + math.abs(tonumber(a:sub(i, i + 1), 16) - tonumber(b:sub(i, i + 1), 16))
+			end
+			return d
+		end
+		assert.is_true(
+			dist(tail[1], "#0000ff") < dist(tail[1], rockets.ROCKET_COLOR),
+			"even the cell behind the head is already closer to the shell than to gold: " .. tail[1]
+		)
+	end)
+
+	it("keeps the classic gold tail at tint 0", function()
+		for _, hex in ipairs(rockets.tail_colors("#0000ff", 0)) do
+			assert.are.equal(rockets.ROCKET_COLOR, hex)
+		end
+		assert.are.equal(rockets.ROCKET_COLOR, rockets.tail_colors("#0000ff")[1])
+	end)
+
+	it("gives every rocket a tail drawn from its own palette", function()
+		local r = rockets.new_rocket(layout, config.defaults, { type = "peony" })
+		assert.are.equal(#rockets.ROCKET_TRAIL_GLYPHS, #r.tail)
+		assert.are.equal(1, #r.glow_palette)
+		local plain = rockets.new_rocket(layout, vim.tbl_extend("force", config.defaults, { tail_tint = 0 }), { type = "peony" })
+		assert.are.equal(rockets.ROCKET_COLOR, plain.tail[#plain.tail])
+		assert.are.equal(rockets.ROCKET_COLOR, plain.glow_palette[1])
+	end)
+
 	it("launches from the bottom row toward the top 60 percent", function()
 		for _ = 1, 50 do
 			local r = rockets.new_rocket(layout, config.defaults, { type = "peony" })

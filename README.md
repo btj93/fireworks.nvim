@@ -9,7 +9,8 @@ that claims the blank rows below EOF, so a three line file still fills the windo
 ![A save launching three shells over a Lua buffer, with the light falling across both split windows](assets/demo.gif)
 
 A rocket climbs from the bottom row, slows as it nears its apex, hangs dark for a
-beat, and breaks somewhere in the top 60 percent. The light of the burst falls on
+beat, and breaks somewhere in the top 60 percent. Its trail cools from the lift
+charge's gold into the colour it is about to break in. The light of the burst falls on
 every visible window, not only the one you saved. Text near the burst is
 tinted toward the firework's own colour, brighter on the side facing it, and
 fades out over about a second. About one in twenty rockets fails: a dud that sputters and
@@ -69,6 +70,7 @@ require("fireworks").setup({
   launch_chance = 1.0,
   rockets = { min = 1, max = 3 },
   stagger = { first = { 0.3, 0.8 }, between = { 0.4, 1.4 } },
+  tail_tint = 1.0,
   types = {
     peony = 4,
     chrysanthemum = 3,
@@ -126,6 +128,7 @@ require("fireworks").setup({
 | `launch_chance` | Probability in `[0, 1]` that a qualifying save launches at all. |
 | `rockets` | Inclusive range of rockets per save. The first leaves after a `stagger.first` delay and later ones follow at `stagger.between` intervals. |
 | `stagger` | Seconds, as `{min, max}` ranges, before the first rocket leaves and between rockets. |
+| `tail_tint` | How far the climbing rocket's trail is tinted toward its own shell colour. At `1` the head stays the lift charge's gold and the trail runs the shell colour, reaching it exactly at the tail end. `0` keeps a plain gold comet tail. |
 | `types` | Weights for the burst types. `peony` plain radial, `chrysanthemum` trailing, `willow` drooping, `ring` one radius, `crossette` splitting, `crackle` twinkling, `pistil` inner break in a second colour, `palm` thick rising arms, `kamuro` gold willow with long trails, `salute` a bare flash with a large light. A weight of `0` removes a type. |
 | `palettes` | Weights for colour schemes. `single` is one random colour, `two_tone` two, `rainbow` the whole `colors` list, `gold` the `gold` list. |
 | `sizes` | Weights for burst radius: `small`, `medium`, `large`. |

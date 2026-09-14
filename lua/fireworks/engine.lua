@@ -49,14 +49,13 @@ local function screen_cell(l, y, x)
 	return layout_mod.to_screen(l, floor(y + 0.5), floor(x + 0.5))
 end
 
-local ROCKET_PALETTE = { rockets.ROCKET_COLOR }
-
 local function draw_rocket(r, l, queue)
 	local cfg = state.cfg
-	local hl = light.color_hl(rockets.ROCKET_COLOR)
+	local tail = r.tail
 	for i, t in ipairs(r.trail) do
-		draw_cell(l, queue, t.y, t.x, rockets.ROCKET_TRAIL_GLYPHS[i] or ".", hl)
+		draw_cell(l, queue, t.y, t.x, rockets.ROCKET_TRAIL_GLYPHS[i] or ".", light.color_hl(tail[i] or tail[#tail]))
 	end
+	local hl = light.color_hl(rockets.ROCKET_COLOR)
 	local head = rockets.ROCKET_HEAD
 	local glow = cfg.light.glow
 	if r.falling then
@@ -69,7 +68,7 @@ local function draw_rocket(r, l, queue)
 	end
 	draw_cell(l, queue, r.y, r.x, head, hl)
 	local srow, scol = screen_cell(l, r.y, r.x)
-	light.emit(srow, scol, cfg.light.glow_radius * 0.6, glow, ROCKET_PALETTE)
+	light.emit(srow, scol, cfg.light.glow_radius * 0.6, glow, r.glow_palette)
 end
 
 local function draw_particle(p, l, queue)

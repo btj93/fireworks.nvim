@@ -26,8 +26,9 @@ they are cleared when the show ends.
 
 A rocket climbs from the bottom row of the window, slows as it nears its
 apex, hangs dark for a beat, and breaks somewhere in the top 60 percent of
-the window. The stars that fly out light up the text around them, and that
-light falls on every visible window, not only the one you saved.
+the window. Its trail cools from the lift charge's gold into the colour it
+is about to break in. The stars that fly out light up the text around them,
+and that light falls on every visible window, not only the one you saved.
 
 Requirements                                           *fireworks-requirements*
 
@@ -65,6 +66,7 @@ Every key is optional. The values below are the defaults. >lua
       launch_chance = 1.0,
       rockets = { min = 1, max = 3 },
       stagger = { first = { 0.3, 0.8 }, between = { 0.4, 1.4 } },
+      tail_tint = 1.0,
       types = {
         peony = 4,
         chrysanthemum = 3,
@@ -121,6 +123,13 @@ rockets ~
 stagger ~
     Seconds before the first rocket leaves, and between later ones, each as
     a `{min, max}` range.
+
+tail_tint ~
+    How far the climbing rocket's trail is tinted toward its own shell
+    colour. The head always keeps the lift charge's gold. At the default of
+    1 the trail behind it runs the shell colour and reaches it exactly at
+    the tail end, so the rocket announces what it is about to break in.
+    Set to `0` for a plain gold comet tail.
 
 types ~
     Weights for the burst types, see |fireworks-types|. A weight of `0`
