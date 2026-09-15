@@ -195,7 +195,7 @@ end
 
 ---Returns the virt_lines for a window's filler block and whether any of its
 ---cells is lit or drawn on.
-local function build_filler_lines(l, queue)
+function M.filler_lines(l, queue)
 	local grouped = {}
 	local used = false
 	for _, it in ipairs(queue or {}) do
@@ -219,15 +219,20 @@ local function build_filler_lines(l, queue)
 			end
 		end
 		for c = 0, l.width - 1 do
+			local tint = light.cell_hl(l, l.real_rows + fr, c)
+			lit = lit or tint ~= nil
 			local it = glyph_at[c]
 			if it then
 				flush()
-				chunks[#chunks + 1] = { it.char, it.hl }
+				-- A virt_lines chunk carries one highlight and has nothing
+				-- underneath it, unlike a real buffer row where the glyph is an
+				-- overlay combining with the tint extmark below. Stack the cell's
+				-- tint under the glyph's own colour, or the star punches an unlit
+				-- hole in the glow it is casting.
+				chunks[#chunks + 1] = { it.char, tint and { tint, it.hl } or it.hl }
 				run_hl = nil
 			else
-				local hl = light.cell_hl(l, l.real_rows + fr, c)
-				lit = lit or hl ~= nil
-				hl = hl or "Normal"
+				local hl = tint or "Normal"
 				if hl ~= run_hl then
 					flush()
 					run_hl = hl
@@ -250,7 +255,7 @@ local function render_fillers(layouts, glyphs)
 	local seen = {}
 	for _, l in ipairs(layouts) do
 		if l.filler_rows > 0 then
-			local lines, used = build_filler_lines(l, glyphs[l.win])
+			local lines, used = M.filler_lines(l, glyphs[l.win])
 			if used then
 				seen[l.win] = true
 				local f = state.fillers[l.win]
