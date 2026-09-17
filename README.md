@@ -150,6 +150,78 @@ require("fireworks").setup({
 | `burn.smoke` | Emit drifting `~` smoke from the impact point. |
 | `ignore_filetypes` | Filetypes that never launch on save. Buffers with a non empty `buftype` are always skipped. |
 
+## Recipes
+
+### Fireworks when your tests pass
+
+Set `events = {}` to drop the save trigger, then launch from whatever you would
+rather celebrate. With [neotest](https://github.com/nvim-neotest/neotest), that
+is a consumer: a passing run breaks a shell, a failing one sends up a dud that
+sputters, falls back, and scorches the buffer.
+
+Neotest fires no autocommands for results, and consumers can only be registered
+inside `neotest.setup`, so this goes in your neotest config rather than here:
+
+```lua
+require("neotest").setup({
+  adapters = { --[[ ... ]] },
+  consumers = {
+    fireworks = function(client)
+      client.listeners.results = function(adapter_id, results, partial)
+        if partial then
+          return
+        end
+        local tree = client:get_position(nil, { adapter = adapter_id })
+        if not tree then
+          return
+        end
+        local passed, failed = 0, 0
+        for pos_id, result in pairs(results) do
+          local node = tree:get_key(pos_id)
+          if node and node:data().type == "test" then
+            if result.status == "passed" then
+              passed = passed + 1
+            elseif result.status == "failed" then
+              failed = failed + 1
+            end
+          end
+        end
+        vim.schedule(function()
+          local fireworks = require("fireworks")
+          if not fireworks.enabled or vim.bo.buftype ~= "" then
+            return
+          end
+          if failed > 0 then
+            fireworks.launch({ fail = "dud" })
+          elseif passed > 0 then
+            fireworks.launch({ count = math.min(3, passed) })
+          end
+        end)
+      end
+    end,
+  },
+})
+```
+
+Four lines in there carry the weight:
+
+- `if partial then return end` skips streamed results. Adapters that report each
+  test as it finishes emit a `results` event per test, and without this you get
+  a rocket per test instead of one show per run.
+- `node:data().type == "test"` filters the results table, which is keyed by
+  position and also carries file and directory aggregates. Counting raw keys
+  double counts.
+- `vim.schedule` gets you out of neotest's async context, where most of the API
+  is unavailable.
+- `fireworks.enabled` and the `buftype` check are what `on_write` applies and
+  `launch` does not, so `:Fireworks toggle` still disarms this and a run started
+  from the neotest summary window does not paint a show over the summary.
+
+Pair it with neotest's `watch` consumer and the plugin goes back to being save
+triggered: you save, the tests run, and the shell only breaks if they are green.
+
+One show is launched per adapter, since each adapter reports its own run.
+
 ## How the light works
 
 The light is a byproduct of the particles. Every frame each star deposits a
